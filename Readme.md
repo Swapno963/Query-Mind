@@ -2,7 +2,6 @@
 
 A real-time streaming chat application built with Django, HTMX, and Server-Sent Events (SSE) to mimic popular LLMs like ChatGPT, Claude, etc. It integrates with local LLMs via Ollama.
 
-
 ## Features
 
 - 🚀 Real-time streaming responses using Server-Sent Events (SSE)
