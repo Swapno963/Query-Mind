@@ -35,12 +35,12 @@ def render_markdown(content):
 @method_decorator(csrf_exempt, name="dispatch")
 class HomepageView(ListView):
     """Claude.ai-style homepage showing recent conversations"""
-    
+
     model = Conversation
     template_name = "homepage.html"
     context_object_name = "recent_conversations"
     queryset = Conversation.objects.all().order_by("-updated_at")[:5]
-    
+
     def post(self, request, *args, **kwargs):
         """Handle new conversation creation from homepage"""
         message_content = request.POST.get("message", "").strip()
@@ -66,20 +66,19 @@ class HomepageView(ListView):
         return redirect("chat", conversation_id=conversation.id)
 
 
-
 @method_decorator(csrf_exempt, name="dispatch")
 class ChatView(DetailView):
     """Individual chat conversation view - handles both GET and POST"""
-    
+
     model = Conversation
     template_name = "chat.html"
     context_object_name = "conversation"
     pk_url_kwarg = "conversation_id"
-    
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         conversation = self.object
-        
+
         # Process messages for display
         messages_with_content = []
         for message in conversation.messages.all():
@@ -89,15 +88,17 @@ class ChatView(DetailView):
             else:
                 # AI messages: render markdown
                 formatted_content = render_markdown(message.content)
-            
+
             messages_with_content.append(
                 {"original": message, "formatted_content": formatted_content}
             )
-        
-        context.update({
-            "messages": conversation.messages.all(),
-            "messages_with_content": messages_with_content,
-        })
+
+        context.update(
+            {
+                "messages": conversation.messages.all(),
+                "messages_with_content": messages_with_content,
+            }
+        )
         return context
 
     def post(self, request, conversation_id):
@@ -120,73 +121,121 @@ class ChatView(DetailView):
         # Return user message HTML and placeholder for AI response with SSE
         return HttpResponse(
             f"""
-            <!-- User Message -->
-            <div class="d-flex justify-content-end mb-3 fade-in">
-                <div class="message-bubble user-message rounded-3 px-3 py-2">
-                    <div class="mb-1">{user_formatted}</div>
-                    <small class="opacity-75">{user_message.timestamp.astimezone().strftime('%I:%M %p').lstrip('0').replace(' 0', ' ')}</small>
-                </div>
+    <!-- User Message -->
+    <div class="d-flex justify-content-end mb-3 fade-in">
+        <div class="message-bubble user-message rounded-3 px-3 py-2">
+            <div class="mb-1">{user_formatted}</div>
+            <small class="opacity-75">
+                {user_message.timestamp.astimezone().strftime('%I:%M %p').lstrip('0').replace(' 0', ' ')}
+            </small>
+        </div>
+    </div>
+
+    <!-- AI Message Placeholder -->
+    <div class="d-flex justify-content-start mb-3 fade-in"
+         id="ai-response-{user_message.id}">
+        <div class="me-2">
+            <div class="ai-avatar rounded-circle d-flex align-items-center justify-content-center fw-bold">
+                G3
+            </div>
+        </div>
+
+        <div class="message-bubble ai-message rounded-3 px-3 py-2">
+            <div
+                class="mb-1 text-break markdown-content"
+                id="ai-content-{user_message.id}">
             </div>
 
-            <!-- AI Message Placeholder -->
-            <div class="d-flex justify-content-start mb-3 fade-in" id="ai-response-{user_message.id}">
-                <div class="me-2">
-                    <div class="ai-avatar rounded-circle d-flex align-items-center justify-content-center fw-bold">
-                        G3
-                    </div>
-                </div>
-                <div class="message-bubble ai-message rounded-3 px-3 py-2">
-                    <div class="mb-1 text-break markdown-content" id="ai-content-{user_message.id}"></div>
-                    <small class="text-muted" id="ai-timestamp-{user_message.id}"></small>
-                </div>
-            </div>
+            <small
+                class="text-muted"
+                id="ai-timestamp-{user_message.id}">
+            </small>
+        </div>
+    </div>
 
-            <!-- SSE Script for Streaming -->
-            <script>
-                const eventSource = new EventSource('/chat/{conversation.id}/stream/?message_id={user_message.id}');
-                let aiContent = '';
-                const contentDiv = document.getElementById('ai-content-{user_message.id}');
-                const timestampDiv = document.getElementById('ai-timestamp-{user_message.id}');
-                
-                eventSource.onmessage = function(event) {{
-                    const data = JSON.parse(event.data);
-                    
-                    if (data.type === 'token') {{
-                        aiContent += data.content;
-                        contentDiv.textContent = aiContent;
-                    }} else if (data.type === 'done') {{
-                        timestampDiv.innerHTML = data.timestamp + ' • Gemma 3 4B';
-                        eventSource.close();
-                        // Convert markdown to HTML
-                        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
-                        if (csrfToken) {{
-                            fetch('/chat/{conversation.id}/render-markdown/', {{
+    <script>
+        (function () {{
+            const eventSource = new EventSource(
+                '/chat/{conversation.id}/stream/?message_id={user_message.id}'
+            );
+
+            let aiContent = '';
+
+            const contentDiv = document.getElementById(
+                'ai-content-{user_message.id}'
+            );
+
+            const timestampDiv = document.getElementById(
+                'ai-timestamp-{user_message.id}'
+            );
+
+            eventSource.onmessage = function (event) {{
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'token') {{
+                    aiContent += data.content;
+                    contentDiv.textContent = aiContent;
+                }}
+
+                else if (data.type === 'done') {{
+                    timestampDiv.innerHTML =
+                        data.timestamp + ' • qwen2.5:3b';
+
+                    eventSource.close();
+
+                    const csrfToken =
+                        document.querySelector(
+                            '[name=csrfmiddlewaretoken]'
+                        );
+
+                    if (csrfToken) {{
+                        fetch(
+                            '/chat/{conversation.id}/render-markdown/',
+                            {{
                                 method: 'POST',
                                 headers: {{
                                     'Content-Type': 'application/json',
                                     'X-CSRFToken': csrfToken.value
                                 }},
-                                body: JSON.stringify({{content: aiContent}})
-                            }})
-                            .then(response => response.text())
-                            .then(html => {{
-                                contentDiv.innerHTML = html;
-                                hljs.highlightAll();
-                            }});
-                        }} else {{
-                            // Fallback if no CSRF token - just display raw content
-                            contentDiv.innerHTML = aiContent;
-                        }}
+                                body: JSON.stringify({{
+                                    content: aiContent
+                                }})
+                            }}
+                        )
+                        .then(response => response.text())
+                        .then(html => {{
+                            contentDiv.innerHTML = html;
+                            hljs.highlightAll();
+                        }});
                     }}
-                }};
-                
-                eventSource.onerror = function(event) {{
-                    console.error('SSE error:', event);
-                    console.error('ReadyState:', eventSource.readyState);
-                    eventSource.close();
-                    contentDiv.innerHTML = '<em>Error: Connection lost. Check console for details.</em>';
-                }};
-            </script>
-        """
-        )
+                    else {{
+                        contentDiv.innerHTML = aiContent;
+                    }}
+                }}
 
+                else if (data.type === 'error') {{
+                    contentDiv.innerHTML =
+                        '<em>Error: ' +
+                        data.content +
+                        '</em>';
+
+                    eventSource.close();
+                }}
+            }};
+
+            eventSource.onerror = function (event) {{
+                console.error('SSE error:', event);
+                console.error(
+                    'ReadyState:',
+                    eventSource.readyState
+                );
+
+                eventSource.close();
+
+                contentDiv.innerHTML =
+                    '<em>Error: Connection lost.</em>';
+            }};
+        }})();
+    </script>
+"""
+        )
