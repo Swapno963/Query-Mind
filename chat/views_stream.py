@@ -12,6 +12,7 @@ from .views import render_markdown
 from .services import ConversationService
 from .constants import ERROR_MESSAGES, OLLAMA_CHAT_ENDPOINT, OLLAMA_MODEL
 from connections.services.prompt import PromptGenerator
+from connections.services.sql_validation import ReadOnlySQLExecutor
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -54,7 +55,7 @@ class StreamChatView(SingleObjectMixin, View):
             question=user_message.content,
             conversation_context=conversation_context,
         )
-        print("The full prompt is : ", prompt)
+        # print("The full prompt is : ", prompt)
 
         def generate():
             """Generator function for SSE streaming"""
@@ -78,12 +79,12 @@ class StreamChatView(SingleObjectMixin, View):
                         },
                     ) as response:
                         for line in response.iter_lines():
-                            print("OLLAMA RAW:", repr(line))
+                            # print("OLLAMA RAW:", repr(line))
 
                             if line:
                                 try:
                                     data = json.loads(line)
-                                    print("OLLAMA JSON:", data)
+                                    # print("OLLAMA JSON:", data)
                                     if (
                                         "message" in data
                                         and "content" in data["message"]
@@ -99,20 +100,66 @@ class StreamChatView(SingleObjectMixin, View):
                 yield f"data: {json.dumps({'type': 'error', 'content': f'Connection error: {str(e)}'})}\n\n"
                 return
 
-            # Save the complete message if we got a response
+            # new code
             if full_response:
-                ai_message = ConversationService.add_ai_message(
-                    conversation, full_response
+                sql = full_response.strip()
+
+                print("Generated SQL:", sql)
+
+                # Validate + execute only AFTER the LLM has finished
+                executor = ReadOnlySQLExecutor(
+                    database="client",
+                    allowed_tables={
+                        "students",
+                        "teachers",
+                        "branches",
+                        "courses",
+                    },
                 )
-                # Send completion signal
-                # Convert to local timezone and format to match Django templates (g:i A format)
-                local_time = ai_message.timestamp.astimezone()
-                timestamp_str = (
-                    local_time.strftime("%I:%M %p").lstrip("0").replace(" 0", " ")
-                )
-                yield f"data: {json.dumps({'type': 'done', 'timestamp': timestamp_str})}\n\n"
-            else:
-                yield f"data: {json.dumps({'type': 'error', 'content': ERROR_MESSAGES['NO_RESPONSE']})}\n\n"
+
+                try:
+                    executor.validate(sql)
+
+                    yield f"data: {json.dumps({
+                        'type': 'sql',
+                        'content': sql,
+                    })}\n\n"
+
+                    yield f"data: {json.dumps({
+                        'type': 'query_started','content':'Running sql query to the database.'
+                    })}\n\n"
+
+                    for row in executor.stream(sql):
+                        yield f"data: {json.dumps({
+                            'type': 'row',
+                            'content': row,
+                        })}\n\n"
+
+                    yield f"data: {json.dumps({
+                        'type': 'query_completed','content':'Query run successfully.'
+                    })}\n\n"
+
+                    # Save the complete message if we got a response
+                    # if full_response:
+                    #     print("Full response is : ", full_response)
+                    ai_message = ConversationService.add_ai_message(
+                        conversation, full_response
+                    )
+                    #     print("Ai message is : ", ai_message)
+                    #     # Send completion signal
+                    #     # Convert to local timezone and format to match Django templates (g:i A format)
+                    local_time = ai_message.timestamp.astimezone()
+                    timestamp_str = (
+                        local_time.strftime("%I:%M %p").lstrip("0").replace(" 0", " ")
+                    )
+                    yield f"data: {json.dumps({'type': 'done', 'timestamp': timestamp_str})}\n\n"
+                # else:
+                #     yield f"data: {json.dumps({'type': 'error', 'content': ERROR_MESSAGES['NO_RESPONSE']})}\n\n"
+                except Exception as e:
+                    yield f"data: {json.dumps({
+                        'type': 'error',
+                        'content': str(e),
+                    })}\n\n"
 
         response = StreamingHttpResponse(generate(), content_type="text/event-stream")
         response["Cache-Control"] = "no-cache"

@@ -150,10 +150,29 @@ class ChatView(DetailView):
                 class="text-muted"
                 id="ai-timestamp-{user_message.id}">
             </small>
+
+            <div id="query-status-{user_message.id}"></div>
+
+<div id="query-results-{user_message.id}"></div>
         </div>
     </div>
 
-    <script>
+<script>
+    function addResultRow(row) {{
+    const resultsDiv = document.getElementById(
+        'query-results-{user_message.id}'
+    );
+
+    if (!resultsDiv) {{
+        return;
+    }}
+
+    const rowDiv = document.createElement('div');
+
+    rowDiv.textContent = JSON.stringify(row);
+
+    resultsDiv.appendChild(rowDiv);
+}}
         (function () {{
             const eventSource = new EventSource(
                 '/chat/{conversation.id}/stream/?message_id={user_message.id}'
@@ -177,6 +196,42 @@ class ChatView(DetailView):
                     contentDiv.textContent = aiContent;
                 }}
 
+                else if (data.type === 'sql') {{
+                        aiContent = data.content;
+
+                        contentDiv.textContent = aiContent;
+
+                        console.log('Generated SQL:', data.content);
+                    }}
+
+                else if (data.type === 'query_started') {{
+                        console.log(data.content);
+
+                        const statusDiv = document.getElementById(
+                            'query-status-{user_message.id}'
+                        );
+
+                        if (statusDiv) {{
+                            statusDiv.textContent = data.content;
+                        }}
+                    }}
+
+                else if (data.type === 'row') {{
+                        console.log('DB row:', data.content);
+
+                        addResultRow(data.content);
+                    }}
+                else if (data.type === 'query_completed') {{
+                        console.log(data.content);
+
+                        const statusDiv = document.getElementById(
+                            'query-status-{user_message.id}'
+                        );
+
+                        if (statusDiv) {{
+                            statusDiv.textContent = data.content;
+                        }}
+                    }}
                 else if (data.type === 'done') {{
                     timestampDiv.innerHTML =
                         data.timestamp + ' • qwen2.5:3b';
