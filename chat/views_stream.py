@@ -109,12 +109,12 @@ class StreamChatView(SingleObjectMixin, View):
                 # Validate + execute only AFTER the LLM has finished
                 executor = ReadOnlySQLExecutor(
                     database="client",
-                    allowed_tables={
-                        "students",
-                        "teachers",
-                        "branches",
-                        "courses",
-                    },
+                    # allowed_tables={
+                    #     "students",
+                    #     "teachers",
+                    #     "branches",
+                    #     "courses",
+                    # },
                 )
 
                 try:

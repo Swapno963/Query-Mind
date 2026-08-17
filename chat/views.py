@@ -146,16 +146,16 @@ class ChatView(DetailView):
                 id="ai-content-{user_message.id}">
             </div>
 
-            <small
-                class="text-muted"
-                id="ai-timestamp-{user_message.id}">
-            </small>
+           
 
             <div id="query-status-{user_message.id}"></div>
 
-<div id="query-results-{user_message.id}"></div>
+            <div id="query-results-{user_message.id}"></div>
+             <small class="text-muted" id="ai-timestamp-{user_message.id}">
+            </small>
         </div>
     </div>
+
 
 <script>
     function addResultRow(row) {{

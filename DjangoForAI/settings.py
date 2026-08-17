@@ -116,10 +116,11 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "America/New_York"
+LANGUAGE_CODE = "en-us"
+
+TIME_ZONE = "Asia/Dhaka"
 
 USE_I18N = True
-
 USE_TZ = True
 
 
