@@ -13,6 +13,7 @@ from .services import ConversationService
 from .constants import ERROR_MESSAGES, OLLAMA_CHAT_ENDPOINT, OLLAMA_MODEL
 from connections.services.prompt import PromptGenerator
 from connections.services.sql_validation import ReadOnlySQLExecutor
+from connections.services.result_prompt import SQLResultPromptGenerator
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -125,19 +126,68 @@ class StreamChatView(SingleObjectMixin, View):
                         'content': sql,
                     })}\n\n"
 
-                    yield f"data: {json.dumps({
-                        'type': 'query_started','content':'Running sql query to the database.'
-                    })}\n\n"
+                    # yield f"data: {json.dumps({
+                    #     'type': 'query_started','content':'Running sql query to the database.'
+                    # })}\n\n"
+
+                    # yield f"data: {json.dumps({
+                    #                         'type': 'query_completed','content':'Query run successfully.'
+                    #                     })}\n\n"
+
+                    print("The user message is : ", user_message)
+                    rows = []
 
                     for row in executor.stream(sql):
-                        yield f"data: {json.dumps({
-                            'type': 'row',
-                            'content': row,
-                        })}\n\n"
+                        rows.append(row)
+                    prompt_generator = SQLResultPromptGenerator()
 
-                    yield f"data: {json.dumps({
-                        'type': 'query_completed','content':'Query run successfully.'
-                    })}\n\n"
+                    answer_prompt = prompt_generator.generate(
+                        user_question=user_message,
+                        sql=sql,
+                        rows=rows,
+                    )
+                    try:
+                        # Use synchronous httpx client with stream
+                        with httpx.Client(timeout=60.0) as client:
+                            with client.stream(
+                                "POST",
+                                OLLAMA_CHAT_ENDPOINT,
+                                json={
+                                    "model": OLLAMA_MODEL,
+                                    "messages": [
+                                        {
+                                            "role": "user",
+                                            "content": answer_prompt,
+                                        }
+                                    ],
+                                    "stream": True,
+                                },
+                            ) as response:
+                                for line in response.iter_lines():
+                                    # print("OLLAMA RAW:", repr(line))
+
+                                    if line:
+                                        try:
+                                            data = json.loads(line)
+                                            # print("OLLAMA JSON:", data)
+                                            if (
+                                                "message" in data
+                                                and "content" in data["message"]
+                                            ):
+                                                token = data["message"]["content"]
+                                                full_response += token
+                                                yield f"data: {json.dumps({'type': 'result', 'content': token})}\n\n"
+                                        except json.JSONDecodeError:
+                                            continue
+                                        except Exception as e:
+                                            yield f"data: {json.dumps({'type': 'error', 'content': f'Parse error: {str(e)}'})}\n\n"
+                    except Exception as e:
+                        yield f"data: {json.dumps({'type': 'error', 'content': f'Connection error: {str(e)}'})}\n\n"
+                        return
+                    # yield f"data: {json.dumps({
+                    #         'type': 'token',
+                    #         'content': answer_prompt,
+                    #     })}\n\n"
 
                     # Save the complete message if we got a response
                     # if full_response:
@@ -152,6 +202,7 @@ class StreamChatView(SingleObjectMixin, View):
                     timestamp_str = (
                         local_time.strftime("%I:%M %p").lstrip("0").replace(" 0", " ")
                     )
+
                     yield f"data: {json.dumps({'type': 'done', 'timestamp': timestamp_str})}\n\n"
                 # else:
                 #     yield f"data: {json.dumps({'type': 'error', 'content': ERROR_MESSAGES['NO_RESPONSE']})}\n\n"

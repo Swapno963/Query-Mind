@@ -179,10 +179,15 @@ class ChatView(DetailView):
             );
 
             let aiContent = '';
+            let aiResultContent = '';
 
             const contentDiv = document.getElementById(
                 'ai-content-{user_message.id}'
             );
+
+             const resultDiv = document.getElementById(
+                            'query-results-{user_message.id}'
+                        );
 
             const timestampDiv = document.getElementById(
                 'ai-timestamp-{user_message.id}'
@@ -216,10 +221,10 @@ class ChatView(DetailView):
                         }}
                     }}
 
-                else if (data.type === 'row') {{
-                        console.log('DB row:', data.content);
-
-                        addResultRow(data.content);
+                else if (data.type === 'result') {{
+                       
+                    aiResultContent += data.content;
+                    resultDiv.textContent = aiResultContent;
                     }}
                 else if (data.type === 'query_completed') {{
                         console.log(data.content);
