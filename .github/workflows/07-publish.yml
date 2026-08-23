@@ -84,11 +84,11 @@ jobs:
       - name: Build Image
         run: |
           docker buildx build \
-            --platform linux \
+            --platform linux/amd64 \
             --load \
             -t ${{ steps.login.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }} \
             -t ${{ steps.login.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest \
-            .a
+            .
 
       ##################################
       # Push Image
