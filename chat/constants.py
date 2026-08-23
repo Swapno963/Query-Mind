@@ -33,3 +33,7 @@ ERROR_MESSAGES = {
 # Model Display Names
 AI_DISPLAY_NAME = "Qwen 2.5 3B"
 AI_AVATAR_TEXT = "Q2.5"
+
+
+# for gemini
+GEMINI_API_KEY = ""

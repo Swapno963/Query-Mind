@@ -10,8 +10,14 @@ from connections.services.prompt import PromptGenerator
 
 from connections.services.result_prompt import SQLResultPromptGenerator
 from connections.services.sql_validation import ReadOnlySQLExecutor
+from google import genai
 
-from chat.constants import ERROR_MESSAGES, OLLAMA_CHAT_ENDPOINT, OLLAMA_MODEL
+from chat.constants import (
+    ERROR_MESSAGES,
+    OLLAMA_CHAT_ENDPOINT,
+    OLLAMA_MODEL,
+    GEMINI_API_KEY,
+)
 
 
 class ChatService:
@@ -45,11 +51,13 @@ class ChatService:
             conversation_context=conversation_context,
         )
 
+        print("The prompt is : ", prompt)
+
         # -----------------------------------------
         # 3. Ask Qwen for SQL
         # -----------------------------------------
 
-        sql = ChatService.ask_qwen(prompt)
+        sql = ChatService.ask_ai(prompt)
 
         sql = sql.strip()
 
@@ -91,7 +99,7 @@ class ChatService:
         # 7. Ask Qwen for final answer
         # -----------------------------------------
 
-        # final_answer = ChatService.ask_qwen(answer_prompt)
+        # final_answer = ChatService.ask_ai(answer_prompt)
 
         # final_answer = final_answer.strip()
 
@@ -145,7 +153,7 @@ class ChatService:
         # 3. Ask Qwen for SQL
         # -----------------------------------------
 
-        # sql = ChatService.ask_qwen(prompt)
+        # sql = ChatService.ask_ai(prompt)
 
         # sql = sql.strip()
 
@@ -187,7 +195,7 @@ class ChatService:
         # 7. Ask Qwen for final answer
         # -----------------------------------------
 
-        final_answer = ChatService.ask_qwen(answer_prompt)
+        final_answer = ChatService.ask_ai(answer_prompt)
 
         final_answer = final_answer.strip()
 
@@ -207,25 +215,47 @@ class ChatService:
             # "ai_message": ai_message,
         }
 
+    # @staticmethod
+    # def ask_ai(prompt):
+    #     with httpx.Client(timeout=60.0) as client:
+    #         response = client.post(
+    #             OLLAMA_CHAT_ENDPOINT,
+    #             json={
+    #                 "model": OLLAMA_MODEL,
+    #                 "messages": [
+    #                     {
+    #                         "role": "user",
+    #                         "content": prompt,
+    #                     }
+    #                 ],
+    #                 "stream": False,
+    #             },
+    #         )
+
+    #         response.raise_for_status()
+
+    #         data = response.json()
+
+    #         return data["message"]["content"]
+
     @staticmethod
-    def ask_qwen(prompt):
-        with httpx.Client(timeout=60.0) as client:
-            response = client.post(
-                OLLAMA_CHAT_ENDPOINT,
-                json={
-                    "model": OLLAMA_MODEL,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": prompt,
-                        }
-                    ],
-                    "stream": False,
-                },
-            )
+    def ask_ai(prompt: str) -> str:
+        api_key = GEMINI_API_KEY
+        # if not api_key:
+        #     raise ValueError("GEMINI_API_KEY environment variable is missing.")
 
-            response.raise_for_status()
+        # # Using the fast, cost-effective flash model; can be swapped to gemini-3.7-flash
+        # url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        # with httpx.Client(timeout=60.0) as client:
+        #     response = client.post(
+        #         url, json={"contents": [{"parts": [{"text": prompt}]}]}
+        #     )
 
-            data = response.json()
+        #     response.raise_for_status()
+        #     data = response.json()
+        client = genai.Client()
 
-            return data["message"]["content"]
+        interaction = client.interactions.create(model="gemini-3.7-flash", input=prompt)
+        # Navigate Gemini's specific response hierarchy
+        print("The interaction is : ", interaction)
+        return interaction.output_text

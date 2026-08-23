@@ -21,6 +21,20 @@ class ChatRequestSerializer(serializers.Serializer):
         required=True,
     )
 
+    message = serializers.CharField(
+        required=True,
+    )
+
+
+class ChatRequestResultSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField(
+        required=True,
+    )
+
+    tenant_id = serializers.IntegerField(
+        required=True,
+    )
+
     user_message_id = serializers.IntegerField(
         required=True,
     )

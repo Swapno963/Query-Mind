@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from ..services import ConversationService
 from chat.api.chat_service import ChatService
 
-from .serializers import ChatRequestSerializer
+from .serializers import ChatRequestSerializer, ChatRequestResultSerializer
 
 
 class ChatAPIView(APIView):
@@ -82,7 +82,7 @@ class ChatResultAPIView(APIView):
         # 1. Validate request
         # -----------------------------------------
 
-        serializer = ChatRequestSerializer(data=request.data)
+        serializer = ChatRequestResultSerializer(data=request.data)
 
         serializer.is_valid(raise_exception=True)
 
