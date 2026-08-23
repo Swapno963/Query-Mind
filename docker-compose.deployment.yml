@@ -1,6 +1,6 @@
 services:
   api:
-    image: ${ECR_REGISTRY}/chat-api:${BACKEND_IMAGE_TAG}
+    image: ${ECR_REGISTRY}/:${BACKEND_IMAGE_TAG}
     container_name: chat-llm
     restart: unless-stopped
     depends_on:
