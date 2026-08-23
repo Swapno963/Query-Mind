@@ -9,8 +9,8 @@ services:
 
     env_file:
       - .env
-    volumes:
-      - sqlite_data:/app/db.sqlite3
+    # volumes:
+    #   - sqlite_data:/app/db.sqlite3
 
     healthcheck:
       test:
@@ -35,8 +35,8 @@ services:
     command: python manage.py migrate
     env_file:
       - .env
-    volumes:
-      - sqlite_data:/app/db.sqlite3
+    # volumes:
+    #   - sqlite_data:/app/db.sqlite3
 
   nginx:
     image: nginx:1.29-alpine
@@ -59,8 +59,8 @@ services:
 
 
 
-volumes:
-  sqlite_data:
+# volumes:
+#   sqlite_data:
 
 
 networks:
