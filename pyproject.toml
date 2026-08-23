@@ -5,6 +5,7 @@ description = "Django AI Chat with Ollama and HTMX"
 dependencies = [
     "django>=5.0",
     "djangorestframework>=3.18.0",
+    "google-genai>=2.19.0",
     "httpx>=0.25.0",
     "markdown>=3.5",
     "mcp[cli]>=2.0.0",
