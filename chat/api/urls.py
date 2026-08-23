@@ -12,6 +12,6 @@ urlpatterns = [
     path(
         "chat/result/",
         ChatResultAPIView.as_view(),
-        name="api-chat-bot",
+        name="api-chat",
     ),
 ]
