@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Generator, Any
+from typing import Any
 
 import sqlglot
 from sqlglot import exp

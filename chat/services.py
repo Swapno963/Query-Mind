@@ -2,7 +2,6 @@
 
 import httpx
 import json
-from django.utils import timezone
 from django.db import transaction
 from .models import Conversation, Message
 from .constants import (

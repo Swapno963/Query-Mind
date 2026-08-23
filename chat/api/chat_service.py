@@ -1,23 +1,11 @@
-import json
-import httpx
 
-from django.conf import settings
 
-from ..models import Message
-from ..services import ConversationService
 from connections.services.prompt import PromptGenerator
 from connections.services.prompt import PromptGenerator
 
 from connections.services.result_prompt import SQLResultPromptGenerator
-from connections.services.sql_validation import ReadOnlySQLExecutor
 from google import genai
 
-from chat.constants import (
-    ERROR_MESSAGES,
-    OLLAMA_CHAT_ENDPOINT,
-    OLLAMA_MODEL,
-    GEMINI_API_KEY,
-)
 
 
 class ChatService:

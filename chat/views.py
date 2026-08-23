@@ -2,7 +2,6 @@ import markdown
 from django.shortcuts import redirect, get_object_or_404
 from django.http import HttpResponse
 from django.views.generic import ListView, DetailView
-from django.views.generic.edit import FormMixin
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.template.defaultfilters import linebreaksbr
@@ -10,13 +9,9 @@ from django.utils.html import escape
 from django.utils.safestring import mark_safe
 
 from .models import Conversation, Message
-from .forms import ConversationStartForm, MessageForm
 from .services import ConversationService
 from .constants import (
-    RECENT_CONVERSATIONS_LIMIT,
     ERROR_MESSAGES,
-    AI_DISPLAY_NAME,
-    AI_AVATAR_TEXT,
 )
 
 
