@@ -6,6 +6,11 @@ from ..services import ConversationService
 from chat.api.chat_service import ChatService
 
 from .serializers import ChatRequestSerializer, ChatRequestResultSerializer
+from django.http import JsonResponse
+
+
+def health_check(request):
+    return JsonResponse({"status": "ok", "version": "1.0.0"})
 
 
 class ChatAPIView(APIView):

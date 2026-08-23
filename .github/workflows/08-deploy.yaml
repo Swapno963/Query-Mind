@@ -9,23 +9,8 @@ on:
         default: latest
         type: string
 
-      frontend_image_tag:
-        description: "Frontend Docker image tag"
-        required: true
-        default: latest
-        type: string
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    environment: production
-
-    steps:
-      - run: |
-          echo "PORT=${{ secrets.PORT != '' }}"
-          echo "POSTGRES_DB=${{ secrets.POSTGRES_DB != '' }}"
-          echo "JWT_SECRET=${{ secrets.JWT_SECRET != '' }}"
-          echo "ACCESS_KEY=${{ secrets.ACCESS_KEY != '' }}"
   deploy:
     runs-on: ubuntu-latest
 
@@ -66,15 +51,6 @@ jobs:
             # Create the application directory.
             sudo mkdir -p /opt/app
             
-            # Remove old deployment directories to avoid stale files.
-            rm -rf /opt/app/migrations
-            rm -rf /opt/app/seeds
-            rm -rf /opt/app/backup
-
-            # Docker may have created migrations as root previously.
-            sudo mkdir -p /opt/app/migrations
-            sudo mkdir -p /opt/app/seeds
-            sudo mkdir -p /opt/app/backup
 
             # Allow the ubuntu SSH user to overwrite deployment files.
             sudo chown -R ubuntu:ubuntu /opt/app
@@ -84,9 +60,7 @@ jobs:
 
             echo "=== Current directory ownership ==="
             ls -ld /opt/app
-            ls -ld /opt/app/migrations
-            ls -ld /opt/app/seeds
-            ls -ld /opt/app/backup
+
             
       ########################################################
       # Upload deployment files
@@ -112,37 +86,11 @@ jobs:
         env:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
-
           BACKEND_IMAGE_TAG: ${{ inputs.backend_image_tag }}
-          FRONTEND_IMAGE_TAG: ${{ inputs.frontend_image_tag }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY}}
 
-          PORT: ${{ secrets.PORT }}
 
-          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
-          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
 
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-
-          ACCESS_KEY: ${{ secrets.ACCESS_KEY }}
-          SECRET_KEY: ${{ secrets.SECRET_KEY }}
-
-          # Convert the GitHub secret names into clearer
-          # application environment variable names.
-          END_POINT: ${{ secrets.END_POINT }}
-          USE_SSL: ${{ secrets.USE_SSL }}
-          BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
-
-          # frontend
-          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
-          ALLOWED_ORIGINS : ${{secrets.ALLOWED_ORIGINS}}
-          # backend
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          REDIS_HOST: ${{ secrets.REDIS_HOST }}
-          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
-          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
-          SMS_CONFIG_ENCRYPTION_KEY: ${{secrets.SMS_CONFIG_ENCRYPTION_KEY}}
-          
 
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -153,24 +101,9 @@ jobs:
             AWS_REGION,
             ECR_REGISTRY,
             BACKEND_IMAGE_TAG,
-            FRONTEND_IMAGE_TAG,
-            PORT,
-            POSTGRES_DB,
-            POSTGRES_USER,
-            POSTGRES_PASSWORD,
-            JWT_SECRET,
-            ACCESS_KEY,
-            SECRET_KEY,
-            END_POINT,
-            USE_SSL,
-            BUCKET_NAME,
-            NEXT_PUBLIC_API_URL,
-            DATABASE_URL,
-            ALLOWED_ORIGINS,
-            REDIS_HOST,
-            REDIS_PASSWORD,
-            JWT_REFRESH_SECRET,
-            SMS_CONFIG_ENCRYPTION_KEY
+            GEMINI_API_KEY,
+
+           
 
           script: |
             set -Eeuo pipefail
@@ -194,24 +127,8 @@ jobs:
               AWS_REGION
               ECR_REGISTRY
               BACKEND_IMAGE_TAG
-              FRONTEND_IMAGE_TAG
-              PORT
-              POSTGRES_DB
-              POSTGRES_USER
-              POSTGRES_PASSWORD
-              JWT_SECRET
-              ACCESS_KEY
-              SECRET_KEY
-              END_POINT
-              USE_SSL
-              BUCKET_NAME
-              NEXT_PUBLIC_API_URL
-              DATABASE_URL
-              ALLOWED_ORIGINS
-              REDIS_HOST
-              REDIS_PASSWORD
-              JWT_REFRESH_SECRET
-              SMS_CONFIG_ENCRYPTION_KEY
+              GEMINI_API_KEY
+              
             )
 
             missing_variables=()
@@ -232,63 +149,25 @@ jobs:
               exit 1
             fi
 
-            # Show only safe, non-sensitive values.
-            echo "=== Remote deployment configuration ==="
-            echo "AWS_REGION=$AWS_REGION"
-            echo "ECR_REGISTRY=$ECR_REGISTRY"
-            echo "BACKEND_IMAGE_TAG=$BACKEND_IMAGE_TAG"
-            echo "FRONTEND_IMAGE_TAG=$FRONTEND_IMAGE_TAG"
-            echo "PORT=$PORT"
-            echo "POSTGRES_DB is configured"
-            echo "POSTGRES_USER is configured"
-            echo "POSTGRES_PASSWORD is configured"
-            echo "JWT_SECRET is configured"
-            echo "AWS credentials are configured"
-            echo "======================================="
+           
 
             ####################################################
             # Generate application .env file
             ####################################################
             cat > .env <<EOF
             APP_ENV=production
-            PORT=${PORT}
-
-            DB_NAME=${POSTGRES_DB}
-            DB_USER=${POSTGRES_USER}
-            DB_PASSWORD=${POSTGRES_PASSWORD}
-
-            POSTGRES_DB=${POSTGRES_DB}
-            POSTGRES_USER=${POSTGRES_USER}
-            POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-
-            JWT_SECRET=${JWT_SECRET}
-
-            ACCESS_KEY=${ACCESS_KEY}
-            SECRET_KEY=${SECRET_KEY}
-            END_POINT=${END_POINT}
-            USE_SSL=${USE_SSL}
-            BUCKET_NAME=${BUCKET_NAME}
-
             AWS_REGION=${AWS_REGION}
             ECR_REGISTRY=${ECR_REGISTRY}
             BACKEND_IMAGE_TAG=${BACKEND_IMAGE_TAG}
-            FRONTEND_IMAGE_TAG=${FRONTEND_IMAGE_TAG}
-            NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-            DATABASE_URL=${DATABASE_URL}
-
-            
-            DATABASE_URL=${DATABASE_URL}
-            ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
-            REDIS_HOST=${REDIS_HOST}
-            REDIS_PASSWORD=${REDIS_PASSWORD}
-            JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
-            SMS_CONFIG_ENCRYPTION_KEY=${SMS_CONFIG_ENCRYPTION_KEY}
+            GEMINI_API_KEY=${GEMINI_API_KEY}
+          
             EOF
-
+            
             # Prevent other Linux users from reading secrets.
             chmod 600 .env
-
-
+            
+            # setting gemini api key
+            export GEMINI_API_KEY=${GEMINI_API_KEY}
 
 
             ####################################################
@@ -339,31 +218,15 @@ jobs:
               -f docker-compose.deployment.yml \
               pull
 
-            ####################################################
-            # First runs migrate
-            ####################################################
-            if ! docker compose --env-file .env -f docker-compose.deployment.yml run migrate; then
-              echo "Migration failed; aborting deploy."
-              exit 1
-            fi
 
-            
-            ####################################################
-            # Start backup containers
-            ####################################################
-            docker compose \
-              --env-file .env \
-              -f docker-compose.deployment.yml \
-              up -d --build backup
 
             ####################################################
-            # Start Other containers
+            # Start containers
             ####################################################
             if ! docker compose \
               --env-file .env \
               -f docker-compose.deployment.yml \
-              up -d api frontend worker_1 worker_2
-
+              up -d 
 
             then
               echo "Deployment failed."

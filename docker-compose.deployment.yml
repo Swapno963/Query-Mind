@@ -1,7 +1,7 @@
 services:
   api:
-    image: ${ECR_REGISTRY}/education-api:${BACKEND_IMAGE_TAG}
-    container_name: education-api
+    image: ${ECR_REGISTRY}/chat-api:${BACKEND_IMAGE_TAG}
+    container_name: chat-llm
     restart: unless-stopped
     depends_on:
       postgres:
@@ -12,7 +12,7 @@ services:
       - .env
 
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/v1/health"]
       interval: 5s
       timeout: 3s
       retries: 10
