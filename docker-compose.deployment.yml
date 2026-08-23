@@ -13,7 +13,13 @@ services:
       - sqlite_data:/app/db.sqlite3
 
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8000/api/v1/health"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
