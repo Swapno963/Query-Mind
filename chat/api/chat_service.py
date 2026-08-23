@@ -240,19 +240,6 @@ class ChatService:
 
     @staticmethod
     def ask_ai(prompt: str) -> str:
-        api_key = GEMINI_API_KEY
-        # if not api_key:
-        #     raise ValueError("GEMINI_API_KEY environment variable is missing.")
-
-        # # Using the fast, cost-effective flash model; can be swapped to gemini-3.7-flash
-        # url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        # with httpx.Client(timeout=60.0) as client:
-        #     response = client.post(
-        #         url, json={"contents": [{"parts": [{"text": prompt}]}]}
-        #     )
-
-        #     response.raise_for_status()
-        #     data = response.json()
         client = genai.Client()
 
         interaction = client.interactions.create(model="gemini-3.7-flash", input=prompt)
