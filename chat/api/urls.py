@@ -12,7 +12,7 @@ urlpatterns = [
     path(
         "chat/result/",
         ChatResultAPIView.as_view(),
-        name="api-chat-test",
+        name="api-chat",
     ),
     path("health", health_check),
 ]
