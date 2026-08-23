@@ -1,0 +1,113 @@
+name: Publish Docker Image
+
+on:
+  push:
+    branches:
+      - gemini_api
+    paths-ignore:
+      # Documentation
+      - "**/*.md"
+
+      # GitHub templates/configuration
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+
+      # Development/local configuration
+      - ".env.example"
+      - ".vscode/**"
+      - ".idea/**"
+
+      # Local/development Docker Compose files
+      - "docker-compose.yml"
+      - "docker-compose.deployment copy.yml"
+
+      # Documentation / notes
+      - "backgroundjob.md"
+
+      # Git metadata
+      - ".gitignore"
+
+      # Seed data
+      - "seeds/**"
+
+      # Backup scripts/data
+      - "backup/**"
+
+      # Local-only configuration
+      - "servers.json"
+
+      # Nginx configuration
+      - "nginx.conf"
+
+      # Terraform configuration
+      - "terraform/**"
+
+      # GitHub workflow changes
+      - ".github/workflows/**"
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: chat-api
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      ##################################
+      # Configure AWS Credentials
+      ##################################
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      ##################################
+      # Login to Amazon ECR
+      ##################################
+
+      - name: Login to Amazon ECR
+        id: login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      ##################################
+      # Build Image
+      ##################################
+
+      - name: Build Image
+        run: |
+          docker buildx build \
+            --platform linux \
+            --load \
+            -t ${{ steps.login.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }} \
+            -t ${{ steps.login.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest \
+            .a
+
+      ##################################
+      # Push Image
+      ##################################
+
+      - name: Push Image
+        run: |
+          docker push \
+            ${{ steps.login.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}
+
+          docker push \
+            ${{ steps.login.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest
+
+      ##################################
+      # Verify Image Exists on ecr
+      ##################################
+
+      - name: Verify Image
+        run: |
+          aws ecr describe-images \
+            --repository-name $ECR_REPOSITORY \
+            --image-ids imageTag=${{ github.sha }}
