@@ -4,10 +4,9 @@ services:
     container_name: chat-llm
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
+
     env_file:
       - .env
 
@@ -23,7 +22,11 @@ services:
     networks:
       - app_network
 
-
+  migrate:
+    image: ${ECR_REGISTRY}/chat-api:${BACKEND_IMAGE_TAG}
+    command: python manage.py migrate
+    env_file:
+      - .env
 
   nginx:
     image: nginx:1.29-alpine

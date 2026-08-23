@@ -218,6 +218,12 @@ jobs:
               -f docker-compose.deployment.yml \
               pull
 
+            # run migrations
+            docker compose \
+            --env-file .env \
+            -f docker-compose.deployment.yml \
+            run --rm migrate
+
 
 
             ####################################################
