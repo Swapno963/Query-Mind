@@ -59,7 +59,8 @@ services:
 
 
 
-
+volumes:
+  sqlite_data:
 
 
 networks:
