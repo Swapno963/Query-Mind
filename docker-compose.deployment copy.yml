@@ -1,0 +1,55 @@
+services:
+  api:
+    image: ${ECR_REGISTRY}/education-api:${BACKEND_IMAGE_TAG}
+    container_name: education-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    # expose:
+    #   - "8080"
+
+    networks:
+      - app_network
+
+
+
+  nginx:
+    image: nginx:1.29-alpine
+    container_name: nginx
+
+    restart: unless-stopped
+
+    depends_on:
+      - api
+      - frontend
+
+    ports:
+      - "80:80"
+
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+    networks:
+      - app_network
+
+
+
+
+
+
+
+networks:
+  app_network:
+    driver: bridge
