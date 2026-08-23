@@ -8,6 +8,7 @@ dependencies = [
     "httpx>=0.25.0",
     "markdown>=3.5",
     "mcp[cli]>=2.0.0",
+    "sqlglot>=30.17.0",
 ]
 requires-python = ">=3.10"
 
