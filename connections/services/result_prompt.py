@@ -27,6 +27,8 @@ class SQLResultPromptGenerator:
             default=str,
         )
 
+        # SQL QUERY:
+        # {sql}
         return f"""
 You are a database assistant.
 
@@ -36,8 +38,6 @@ returned by the database.
 USER QUESTION:
 {user_question}
 
-SQL QUERY:
-{sql}
 
 DATABASE RESULT:
 {rows_json}

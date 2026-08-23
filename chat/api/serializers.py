@@ -21,10 +21,13 @@ class ChatRequestSerializer(serializers.Serializer):
         required=True,
     )
 
-    message = serializers.CharField(
+    user_message_id = serializers.IntegerField(
         required=True,
-        allow_blank=False,
-        trim_whitespace=True,
+    )
+
+    result = serializers.ListField(
+        child=serializers.DictField(),
+        required=True,
     )
 
 

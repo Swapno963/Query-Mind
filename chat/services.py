@@ -120,6 +120,14 @@ class ConversationService:
         return Conversation.objects.create_with_message(initial_message)
 
     @staticmethod
+    def get_user_message_content(user_message_id):
+        """Return the content of a user message by its ID."""
+        return Message.objects.get(
+            id=user_message_id,
+            is_user=True,
+        ).content
+
+    @staticmethod
     def add_user_message(conversation, content):
         """Add a user message to a conversation"""
         return Message.objects.create(
