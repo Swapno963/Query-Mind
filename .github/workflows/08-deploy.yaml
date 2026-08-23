@@ -20,6 +20,8 @@ jobs:
       ########################################################
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: gemini_api
 
       ########################################################
       # Ensure application directory exists
