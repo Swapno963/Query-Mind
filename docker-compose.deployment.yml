@@ -23,7 +23,7 @@ services:
       - app_network
 
   migrate:
-    image: ${ECR_REGISTRY}/chat-api:${BACKEND_IMAGE_TAG}
+    image: ${ECR_REGISTRY}/:${BACKEND_IMAGE_TAG}
     command: python manage.py migrate
     env_file:
       - .env
