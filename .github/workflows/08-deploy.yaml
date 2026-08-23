@@ -1,0 +1,283 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend_image_tag:
+        description: "Backend Docker image tag"
+        required: true
+        default: latest
+        type: string
+
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      ########################################################
+      # Checkout
+      ########################################################
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: gemini_api
+
+      ########################################################
+      # Ensure application directory exists
+      ########################################################
+      - name: Create application directory
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+
+          script: |
+            sudo mkdir -p /opt/app
+            sudo chown ubuntu:ubuntu /opt/app
+
+
+
+
+      - name: Prepare application directory
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+
+          script: |
+            set -Eeuo pipefail
+
+            # Create the application directory.
+            sudo mkdir -p /opt/app
+            
+
+            # Allow the ubuntu SSH user to overwrite deployment files.
+            sudo chown -R ubuntu:ubuntu /opt/app
+
+            # Ensure directory traversal and file-writing permissions.
+            sudo chmod -R u+rwX /opt/app
+
+            echo "=== Current directory ownership ==="
+            ls -ld /opt/app
+
+            
+      ########################################################
+      # Upload deployment files
+      ########################################################
+      - name: Upload deployment files
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+
+          source: "docker-compose.deployment.yml,nginx.conf,migrations,seeds,backup"
+
+          target: /opt/app
+
+
+
+     ########################################################
+      # Deploy
+      ########################################################
+      - name: Deploy Application
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          BACKEND_IMAGE_TAG: ${{ inputs.backend_image_tag }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY}}
+
+
+
+
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+
+          envs: >-
+            AWS_REGION,
+            ECR_REGISTRY,
+            BACKEND_IMAGE_TAG,
+            GEMINI_API_KEY,
+
+           
+
+          script: |
+            set -Eeuo pipefail
+
+            ####################################################
+            # Go to application directory
+            ####################################################
+            cd /opt/app
+
+            ####################################################
+            # Verify uploaded deployment files
+            ####################################################
+            echo "=== Deployment files ==="
+            ls -lah
+            echo "========================"
+
+            ####################################################
+            # Verify required remote variables
+            ####################################################
+            required_variables=(
+              AWS_REGION
+              ECR_REGISTRY
+              BACKEND_IMAGE_TAG
+              GEMINI_API_KEY
+              
+            )
+
+            missing_variables=()
+
+            for variable_name in "${required_variables[@]}"; do
+              if [[ -z "${!variable_name:-}" ]]; then
+                missing_variables+=("$variable_name")
+              fi
+            done
+
+            if (( ${#missing_variables[@]} > 0 )); then
+              echo "Missing remote environment variables:"
+
+              for variable_name in "${missing_variables[@]}"; do
+                echo "  - $variable_name"
+              done
+
+              exit 1
+            fi
+
+           
+
+            ####################################################
+            # Generate application .env file
+            ####################################################
+            cat > .env <<EOF
+            APP_ENV=production
+            AWS_REGION=${AWS_REGION}
+            ECR_REGISTRY=${ECR_REGISTRY}
+            BACKEND_IMAGE_TAG=${BACKEND_IMAGE_TAG}
+            GEMINI_API_KEY=${GEMINI_API_KEY}
+          
+            EOF
+            
+            # Prevent other Linux users from reading secrets.
+            chmod 600 .env
+            
+            # setting gemini api key
+            export GEMINI_API_KEY=${GEMINI_API_KEY}
+
+
+            ####################################################
+            # Verify ECR credential helper
+            ####################################################
+            docker-credential-ecr-login version
+
+            # Confirm AWS authentication works.
+            # aws sts get-caller-identity
+
+            # Authenticate Docker with the private ECR registry.
+            # aws ecr get-login-password \
+            #   --region "$AWS_REGION" |
+            #   docker login \
+            #     --username AWS \
+            #     --password-stdin "$ECR_REGISTRY"
+
+            ####################################################
+            # Verify ECR credential helper
+            ####################################################
+
+            # Confirm the helper is installed.
+            docker-credential-ecr-login version
+
+            # Confirm Docker has the ECR helper configuration.
+            if [[ ! -f "$HOME/.docker/config.json" ]]; then
+              echo "Missing Docker configuration: $HOME/.docker/config.json"
+              exit 1
+            fi
+
+            echo "=== Docker credential configuration ==="
+            cat "$HOME/.docker/config.json"
+            echo "======================================="
+
+            ####################################################
+            # Validate Docker Compose configuration
+            ####################################################
+            docker compose \
+              --env-file .env \
+              -f docker-compose.deployment.yml \
+              config --quiet
+
+            ####################################################
+            # Pull Docker images
+            ####################################################
+            docker compose \
+              --env-file .env \
+              -f docker-compose.deployment.yml \
+              pull
+
+            # run migrations
+            docker compose \
+            --env-file .env \
+            -f docker-compose.deployment.yml \
+            run --rm migrate
+
+
+
+            ####################################################
+            # Start containers
+            ####################################################
+            if ! docker compose \
+              --env-file .env \
+              -f docker-compose.deployment.yml \
+              up -d 
+
+            then
+              echo "Deployment failed."
+
+              echo "=== Container status ==="
+              docker compose \
+                --env-file .env \
+                -f docker-compose.deployment.yml \
+                ps || true
+
+              echo "=== Recent container logs ==="
+              docker compose \
+                --env-file .env \
+                -f docker-compose.deployment.yml \
+                logs --tail=100 || true
+
+              exit 1
+            fi
+
+            ####################################################
+            # Remove unused Docker images
+            ####################################################
+            docker image prune -af
+
+            ####################################################
+            # Deployment status
+            ####################################################
+            echo "=== Running Docker containers ==="
+            docker ps
+
+            echo "=== Docker Compose services ==="
+            docker compose \
+              --env-file .env \
+              -f docker-compose.deployment.yml \
+              ps
+
+
+
+            echo "Waiting for API to become healthy..."
+
+            until [ "$(docker inspect -f '{{.State.Health.Status}}' education-api)" = "healthy" ]; do
+                sleep 2
+            done
+
+
+            echo "Deployment completed successfully."
