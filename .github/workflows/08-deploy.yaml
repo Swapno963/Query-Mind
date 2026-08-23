@@ -275,7 +275,7 @@ jobs:
 
             echo "Waiting for API to become healthy..."
 
-            until [ "$(docker inspect -f '{{.State.Health.Status}}' education-api)" = "healthy" ]; do
+            until [ "$(docker inspect -f '{{.State.Health.Status}}' api)" = "healthy" ]; do
                 sleep 2
             done
 
