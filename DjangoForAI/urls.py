@@ -5,4 +5,9 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include("connections.urls")),
     path("", include("chat.urls")),  # Chat becomes the root
+    # drf api
+    path(
+        "api/v1/",
+        include("chat.api.urls"),
+    ),
 ]
