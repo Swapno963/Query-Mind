@@ -9,6 +9,8 @@ services:
 
     env_file:
       - .env
+    volumes:
+      - sqlite_data:/app/db.sqlite3
 
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8000/api/v1/health"]
@@ -27,6 +29,8 @@ services:
     command: python manage.py migrate
     env_file:
       - .env
+    volumes:
+      - sqlite_data:/app/db.sqlite3
 
   nginx:
     image: nginx:1.29-alpine

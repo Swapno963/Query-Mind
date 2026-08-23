@@ -35,7 +35,7 @@ WORKDIR /app
 
 # Create non-root user
 RUN groupadd --system django \
-    && useradd --system --gid django django
+    && useradd --system --gid django --home-dir /app --no-create-home django
 
 # Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
@@ -51,4 +51,4 @@ USER django
 
 EXPOSE 8000
 
-CMD ["gunicorn", "DjangoForAI.wsgi:application", "--bind", "0.0.0.0:8000"]
+CMD ["gunicorn", "DjangoForAI.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "--graceful-timeout", "30"]
