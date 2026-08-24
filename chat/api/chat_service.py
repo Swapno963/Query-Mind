@@ -1,11 +1,13 @@
-
-
 from connections.services.prompt import PromptGenerator
 from connections.services.prompt import PromptGenerator
+import traceback
 
 from connections.services.result_prompt import SQLResultPromptGenerator
 from google import genai
-
+import os
+import traceback
+from google import genai
+from google.genai import types
 
 
 class ChatService:
@@ -226,11 +228,101 @@ class ChatService:
 
     #         return data["message"]["content"]
 
+    # @staticmethod
+    # def ask_ai(prompt: str) -> str:
+    #     client = genai.Client()
+
+    #     interaction = client.interactions.create(model="gemini-3.7-flash", input=prompt)
+    #     # Navigate Gemini's specific response hierarchy
+    #     print("The interaction is : ", interaction)
+    #     return interaction.output_text
+
+    # @staticmethod
+    # def ask_ai(prompt: str) -> str:
+    #     try:
+    #         print("Request came to ai: ")
+    #         # return "Thanks for asking"
+    #         api_key = os.getenv("GEMINI_API_KEY")
+    #         print("THe api key is : ", api_key)
+    #         # return "thanks"
+    #         client = genai.Client(api_key=api_key)
+
+    #         interaction = client.interactions.create(
+    #             model="gemini-3.7-flash",
+    #             input=prompt,
+    #         )
+
+    #         print("The interaction is:", interaction)
+
+    #         return interaction.output_text
+
+    #     except Exception as e:
+    #         print("AI request failed:")
+    #         print(f"Error type: {type(e).__name__}")
+    #         print(f"Error message: {e}")
+    #         traceback.print_exc()
+
+    #         return "Sorry, I couldn't process your request right now. Please try again later."
+
     @staticmethod
     def ask_ai(prompt: str) -> str:
-        client = genai.Client()
+        try:
+            print("Request came to ai:")
+            api_key = os.getenv("GEMINI_API_KEY")
 
-        interaction = client.interactions.create(model="gemini-3.7-flash", input=prompt)
-        # Navigate Gemini's specific response hierarchy
-        print("The interaction is : ", interaction)
-        return interaction.output_text
+            # 1. Increase read timeout to 30s to allow headroom for model generation
+            client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(timeout=30000),  # 30 seconds in ms
+            )
+
+            # 2. Stream response chunks to keep socket active
+            response_stream = client.models.generate_content_stream(
+                model="gemini-3.6-flash",
+                contents=prompt,
+            )
+
+            # Accumulate text chunks as they arrive over the wire
+            full_text = "".join(chunk.text for chunk in response_stream if chunk.text)
+            return full_text
+
+        except Exception as e:
+            print("AI request failed:")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {e}")
+            traceback.print_exc()
+
+            return "Sorry, I couldn't process your request right now. Please try again later."
+
+    @staticmethod
+    def ask_ai2(prompt: str) -> str:
+        try:
+            print("Request came to ai: ")
+            api_key = os.getenv("GEMINI_API_KEY")
+
+            # 1. Enforce strict HTTP transport timeout (e.g., 10 seconds)
+            client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(timeout=10000),  # Timeout in ms
+            )
+
+            # 2. Configure interaction for low thinking latency & stateless execution
+            interaction = client.interactions.create(
+                model="gemini-3.7-flash",
+                input=prompt,
+                store=False,  # Disable server-side state allocation for faster single-turn calls
+                generation_config={
+                    "thinking_level": "low"  # Bypass extended multi-step thought loops
+                },
+            )
+
+            print("The interaction is:", interaction)
+            return interaction.output_text
+
+        except Exception as e:
+            print("AI request failed:")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {e}")
+            traceback.print_exc()
+
+            return "Sorry, I couldn't process your request right now. Please try again later."
