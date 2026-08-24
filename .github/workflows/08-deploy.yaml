@@ -220,11 +220,6 @@ jobs:
               -f docker-compose.deployment.yml \
               pull
 
-            # run migrations
-            docker compose \
-            --env-file .env \
-            -f docker-compose.deployment.yml \
-            run --rm migrate
 
 
 
@@ -260,10 +255,10 @@ jobs:
             docker image prune -af
 
             ####################################################
-            # Deployment status
+            # run migrations
             ####################################################
-            echo "=== Running Docker containers ==="
-            docker ps
+            echo "=== Running Migrations ==="
+            docker exec chat-llm python manage.py migrate
 
             echo "=== Docker Compose services ==="
             docker compose \

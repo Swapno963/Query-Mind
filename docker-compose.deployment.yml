@@ -3,9 +3,9 @@ services:
     image: ${ECR_REGISTRY}:${BACKEND_IMAGE_TAG}
     container_name: chat-llm
     restart: unless-stopped
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
+    # depends_on:
+    #   migrate:
+    #     condition: service_completed_successfully
 
     env_file:
       - .env
@@ -30,11 +30,11 @@ services:
     networks:
       - app_network
 
-  migrate:
-    image: ${ECR_REGISTRY}:${BACKEND_IMAGE_TAG}
-    command: python manage.py migrate
-    env_file:
-      - .env
+  # migrate:
+  #   image: ${ECR_REGISTRY}:${BACKEND_IMAGE_TAG}
+  #   command: python manage.py migrate
+  #   env_file:
+  #     - .env
     # volumes:
     #   - sqlite_data:/app/db.sqlite3
 

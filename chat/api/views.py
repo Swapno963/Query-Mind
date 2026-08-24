@@ -7,6 +7,7 @@ from chat.api.chat_service import ChatService
 
 from .serializers import ChatRequestSerializer, ChatRequestResultSerializer
 from django.http import JsonResponse
+from chat.api.chat_service import build_chat_response
 
 
 def health_check(request):
@@ -62,20 +63,23 @@ class ChatAPIView(APIView):
         # 5. Return complete response
         # -----------------------------------------
 
-        return Response(
-            {
-                # "conversation_id": conversation.id,
-                "user_id": conversation.user_id,
-                "tenant_id": conversation.tenant_id,
-                "user_message_id": user_message.id,
-                # "ai_message_id": ai_message.id,
-                "sql": result["sql"],
-                # "rows": result["rows"],
-                # "answer": result["answer"],
-                "conversation_created": created,
-                # "timestamp": ai_message.timestamp,
-            },
-            status=status.HTTP_200_OK,
+        # return Response(
+        #     {
+        #         "user_id": conversation.user_id,
+        #         "tenant_id": conversation.tenant_id,
+        #         "user_message_id": user_message.id,
+        #         "sql": result["sql"],
+        #         "conversation_created": created,
+        #     },
+        #     status=status.HTTP_200_OK,
+        # )
+
+        # 4. Return response using build_chat_response
+        return build_chat_response(
+            conversation=conversation,
+            user_message=user_message,
+            result=result,
+            created=created,
         )
 
 
