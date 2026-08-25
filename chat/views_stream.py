@@ -92,7 +92,7 @@ class StreamChatView(SingleObjectMixin, View):
                                     ):
                                         token = data["message"]["content"]
                                         full_response += token
-                                        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+                                        # yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
                                 except json.JSONDecodeError:
                                     continue
                                 except Exception as e:
@@ -121,10 +121,10 @@ class StreamChatView(SingleObjectMixin, View):
                 try:
                     executor.validate(sql)
 
-                    yield f"data: {json.dumps({
-                        'type': 'sql',
-                        'content': sql,
-                    })}\n\n"
+                    # yield f"data: {json.dumps({
+                    #     'type': 'sql',
+                    #     'content': sql,
+                    # })}\n\n"
 
                     # yield f"data: {json.dumps({
                     #     'type': 'query_started','content':'Running sql query to the database.'
