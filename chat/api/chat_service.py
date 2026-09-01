@@ -272,12 +272,12 @@ class ChatService:
         try:
             print("Request came to ai:")
             api_key = os.getenv("GEMINI_API_KEY")
-
+            print("GEMINI_API_KEY : ", api_key)
             # 1. Increase read timeout to 30s to allow headroom for model generation
             client = genai.Client(
                 api_key=api_key,
-                http_options=types.HttpOptions(timeout=30000),  # 30 seconds in ms
             )
+            # http_options=types.HttpOptions(timeout=30000),  # 30 seconds in ms
 
             # 2. Stream response chunks to keep socket active
             response_stream = client.models.generate_content_stream(
@@ -370,20 +370,20 @@ class SQLFallbackInterceptor:
                 return True, "Out-of-scope question (sentinel expression detected)."
 
         # 2. Verify that query references valid tables (or catches missing FROM clauses)
-        extracted_tables = set(
-            re.findall(r"(?:FROM|JOIN)\s+`?([a-zA-Z0-9_]+)`?", clean_sql, re.IGNORECASE)
-        )
+        # extracted_tables = set(
+        #     re.findall(r"(?:FROM|JOIN)\s+`?([a-zA-Z0-9_]+)`?", clean_sql, re.IGNORECASE)
+        # )
 
-        # If there are no tables (e.g. SELECT NULL;) or hallucinated tables, flag it
-        if not extracted_tables:
-            return True, "Query does not target any schema tables."
+        # # If there are no tables (e.g. SELECT NULL;) or hallucinated tables, flag it
+        # if not extracted_tables:
+        #     return True, "Query does not target any schema tables."
 
-        hallucinated_tables = extracted_tables - allowed_tables
-        if hallucinated_tables:
-            return (
-                True,
-                f"Referenced non-existent tables: {', '.join(hallucinated_tables)}",
-            )
+        # hallucinated_tables = extracted_tables - allowed_tables
+        # if hallucinated_tables:
+        #     return (
+        #         True,
+        #         f"Referenced non-existent tables: {', '.join(hallucinated_tables)}",
+        #     )
 
         return False, "Query is valid."
 
@@ -419,6 +419,7 @@ ALLOWED_TENANT_TABLES = {
 
 
 def build_chat_response(conversation, user_message, result, created):
+    print("Inside build_chat_respons ", conversation, user_message, result, created)
     raw_sql = result.get("sql", "")
 
     # Analyze generated SQL against tenant schema boundaries
@@ -437,7 +438,7 @@ def build_chat_response(conversation, user_message, result, created):
                 "conversation_created": created,
                 "error": {
                     "code": "OUT_OF_SCHEMA_SCOPE",
-                    "message": "The requested information (e.g., subscriptions) is not available in the store database schema.",
+                    # "message": "The requested information (e.g., subscriptions) is not available in the store database schema.",
                     "details": fallback_reason,
                 },
             },
