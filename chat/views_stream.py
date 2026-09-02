@@ -58,12 +58,18 @@ class StreamChatView(SingleObjectMixin, View):
         )
         # print("The full prompt is : ", prompt)
 
+        def sse(event_type, content=None, **extra):
+            payload = {"type": event_type, **extra}
+            if content is not None:
+                payload["content"] = content
+            return f"data: {json.dumps(payload)}\n\n"
+
         def generate():
             """Generator function for SSE streaming"""
             full_response = ""
+            yield sse("status", "Writing SQL…")
 
             try:
-                # Use synchronous httpx client with stream
                 with httpx.Client(timeout=60.0) as client:
                     with client.stream(
                         "POST",
@@ -80,74 +86,45 @@ class StreamChatView(SingleObjectMixin, View):
                         },
                     ) as response:
                         for line in response.iter_lines():
-                            # print("OLLAMA RAW:", repr(line))
-
                             if line:
                                 try:
                                     data = json.loads(line)
-                                    # print("OLLAMA JSON:", data)
                                     if (
                                         "message" in data
                                         and "content" in data["message"]
                                     ):
                                         token = data["message"]["content"]
                                         full_response += token
-                                        # yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
                                 except json.JSONDecodeError:
                                     continue
                                 except Exception as e:
-                                    yield f"data: {json.dumps({'type': 'error', 'content': f'Parse error: {str(e)}'})}\n\n"
+                                    yield sse("error", f"Parse error: {str(e)}")
             except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'content': f'Connection error: {str(e)}'})}\n\n"
+                yield sse("error", f"Connection error: {str(e)}")
                 return
 
-            # new code
             if full_response:
                 sql = full_response.strip()
-
-                print("Generated SQL:", sql)
-
-                # Validate + execute only AFTER the LLM has finished
-                executor = ReadOnlySQLExecutor(
-                    database="client",
-                    # allowed_tables={
-                    #     "students",
-                    #     "teachers",
-                    #     "branches",
-                    #     "courses",
-                    # },
-                )
+                executor = ReadOnlySQLExecutor(database="client")
 
                 try:
                     executor.validate(sql)
+                    yield sse("sql", sql)
+                    yield sse("status", "Running query…")
 
-                    # yield f"data: {json.dumps({
-                    #     'type': 'sql',
-                    #     'content': sql,
-                    # })}\n\n"
-
-                    # yield f"data: {json.dumps({
-                    #     'type': 'query_started','content':'Running sql query to the database.'
-                    # })}\n\n"
-
-                    # yield f"data: {json.dumps({
-                    #                         'type': 'query_completed','content':'Query run successfully.'
-                    #                     })}\n\n"
-
-                    print("The user message is : ", user_message)
                     rows = []
-
                     for row in executor.stream(sql):
                         rows.append(row)
-                    prompt_generator = SQLResultPromptGenerator()
 
+                    yield sse("status", "Writing answer…")
+                    prompt_generator = SQLResultPromptGenerator()
                     answer_prompt = prompt_generator.generate(
                         user_question=user_message,
                         sql=sql,
                         rows=rows,
                     )
+                    answer_text = ""
                     try:
-                        # Use synchronous httpx client with stream
                         with httpx.Client(timeout=60.0) as client:
                             with client.stream(
                                 "POST",
@@ -164,53 +141,36 @@ class StreamChatView(SingleObjectMixin, View):
                                 },
                             ) as response:
                                 for line in response.iter_lines():
-                                    # print("OLLAMA RAW:", repr(line))
-
                                     if line:
                                         try:
                                             data = json.loads(line)
-                                            # print("OLLAMA JSON:", data)
                                             if (
                                                 "message" in data
                                                 and "content" in data["message"]
                                             ):
                                                 token = data["message"]["content"]
-                                                full_response += token
-                                                yield f"data: {json.dumps({'type': 'result', 'content': token})}\n\n"
+                                                answer_text += token
+                                                yield sse("token", token)
                                         except json.JSONDecodeError:
                                             continue
                                         except Exception as e:
-                                            yield f"data: {json.dumps({'type': 'error', 'content': f'Parse error: {str(e)}'})}\n\n"
+                                            yield sse("error", f"Parse error: {str(e)}")
                     except Exception as e:
-                        yield f"data: {json.dumps({'type': 'error', 'content': f'Connection error: {str(e)}'})}\n\n"
+                        yield sse("error", f"Connection error: {str(e)}")
                         return
-                    # yield f"data: {json.dumps({
-                    #         'type': 'token',
-                    #         'content': answer_prompt,
-                    #     })}\n\n"
 
-                    # Save the complete message if we got a response
-                    # if full_response:
-                    #     print("Full response is : ", full_response)
                     ai_message = ConversationService.add_ai_message(
-                        conversation, full_response
+                        conversation, answer_text or sql
                     )
-                    #     print("Ai message is : ", ai_message)
-                    #     # Send completion signal
-                    #     # Convert to local timezone and format to match Django templates (g:i A format)
                     local_time = ai_message.timestamp.astimezone()
                     timestamp_str = (
                         local_time.strftime("%I:%M %p").lstrip("0").replace(" 0", " ")
                     )
-
-                    yield f"data: {json.dumps({'type': 'done', 'timestamp': timestamp_str})}\n\n"
-                # else:
-                #     yield f"data: {json.dumps({'type': 'error', 'content': ERROR_MESSAGES['NO_RESPONSE']})}\n\n"
+                    yield sse("done", timestamp=timestamp_str)
                 except Exception as e:
-                    yield f"data: {json.dumps({
-                        'type': 'error',
-                        'content': str(e),
-                    })}\n\n"
+                    yield sse("error", str(e))
+            else:
+                yield sse("error", ERROR_MESSAGES["NO_RESPONSE"])
 
         response = StreamingHttpResponse(generate(), content_type="text/event-stream")
         response["Cache-Control"] = "no-cache"

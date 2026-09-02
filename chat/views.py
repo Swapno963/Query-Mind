@@ -39,7 +39,7 @@ class HomepageView(ListView):
     model = Conversation
     template_name = "homepage.html"
     context_object_name = "recent_conversations"
-    queryset = Conversation.objects.all().order_by("-updated_at")[:5]
+    queryset = Conversation.objects.all().order_by("-updated_at")[:20]
 
     def post(self, request, *args, **kwargs):
         """Handle new conversation creation from homepage"""
@@ -93,10 +93,21 @@ class ChatView(DetailView):
                 {"original": message, "formatted_content": formatted_content}
             )
 
+        messages = list(conversation.messages.all())
+        pending_stream = (
+            messages[-1] if messages and messages[-1].is_user else None
+        )
+
         context.update(
             {
                 "messages": conversation.messages.all(),
                 "messages_with_content": messages_with_content,
+                "recent_conversations": Conversation.objects.order_by("-updated_at")[
+                    :20
+                ],
+                "ai_display_name": AI_DISPLAY_NAME,
+                "ai_avatar_text": AI_AVATAR_TEXT,
+                "pending_stream": pending_stream,
             }
         )
         return context
@@ -110,192 +121,43 @@ class ChatView(DetailView):
 
         conversation = get_object_or_404(Conversation, id=conversation_id)
 
-        # Save user message using service
         user_message = ConversationService.add_user_message(
             conversation, message_content
         )
-
-        # Format user content
         user_formatted = linebreaksbr(escape(user_message.content))
+        timestamp = (
+            user_message.timestamp.astimezone()
+            .strftime("%I:%M %p")
+            .lstrip("0")
+            .replace(" 0", " ")
+        )
+        mid = user_message.id
+        cid = conversation.id
 
-        # Return user message HTML and placeholder for AI response with SSE
         return HttpResponse(
             f"""
-    <!-- User Message -->
-    <div class="d-flex justify-content-end mb-3 fade-in">
-        <div class="message-bubble user-message rounded-3 px-3 py-2">
-            <div class="mb-1">{user_formatted}</div>
-            <small class="opacity-75">
-                {user_message.timestamp.astimezone().strftime('%I:%M %p').lstrip('0').replace(' 0', ' ')}
-            </small>
+    <div class="message-row user fade-in">
+        <div class="message-bubble user-message">
+            <div>{user_formatted}</div>
+            <span class="msg-time">{timestamp}</span>
         </div>
     </div>
-
-    <!-- AI Message Placeholder -->
-    <div class="d-flex justify-content-start mb-3 fade-in"
-         id="ai-response-{user_message.id}">
-        <div class="me-2">
-            <div class="ai-avatar rounded-circle d-flex align-items-center justify-content-center fw-bold">
-                G3
-            </div>
-        </div>
-
-        <div class="message-bubble ai-message rounded-3 px-3 py-2">
-            <div
-                class="mb-1 text-break markdown-content"
-                id="ai-content-{user_message.id}">
-            </div>
-
-           
-
-            <div id="query-status-{user_message.id}"></div>
-
-            <div id="query-results-{user_message.id}"></div>
-             <small class="text-muted" id="ai-timestamp-{user_message.id}">
-            </small>
+    <div class="message-row fade-in"
+         data-stream-url="/chat/{cid}/stream/?message_id={mid}"
+         data-message-id="{mid}"
+         data-conversation-id="{cid}"
+         data-model-name="{AI_DISPLAY_NAME}">
+        <div class="ai-avatar">{AI_AVATAR_TEXT}</div>
+        <div class="message-bubble ai-message">
+            <div class="stream-status visible" id="query-status-{mid}">Thinking…</div>
+            <details class="sql-panel" id="sql-panel-{mid}" hidden>
+                <summary>Generated SQL</summary>
+                <pre><code id="sql-code-{mid}"></code></pre>
+            </details>
+            <div class="markdown-content" id="ai-content-{mid}"></div>
+            <div id="query-results-{mid}" class="query-results"></div>
+            <span class="msg-time" id="ai-timestamp-{mid}"></span>
         </div>
     </div>
-
-
-<script>
-    function addResultRow(row) {{
-    const resultsDiv = document.getElementById(
-        'query-results-{user_message.id}'
-    );
-
-    if (!resultsDiv) {{
-        return;
-    }}
-
-    const rowDiv = document.createElement('div');
-
-    rowDiv.textContent = JSON.stringify(row);
-
-    resultsDiv.appendChild(rowDiv);
-}}
-        (function () {{
-            const eventSource = new EventSource(
-                '/chat/{conversation.id}/stream/?message_id={user_message.id}'
-            );
-
-            let aiContent = '';
-            let aiResultContent = '';
-
-            const contentDiv = document.getElementById(
-                'ai-content-{user_message.id}'
-            );
-
-             const resultDiv = document.getElementById(
-                            'query-results-{user_message.id}'
-                        );
-
-            const timestampDiv = document.getElementById(
-                'ai-timestamp-{user_message.id}'
-            );
-
-            eventSource.onmessage = function (event) {{
-                const data = JSON.parse(event.data);
-
-                if (data.type === 'token') {{
-                    aiContent += data.content;
-                    contentDiv.textContent = aiContent;
-                }}
-
-                else if (data.type === 'sql') {{
-                        aiContent = data.content;
-
-                        contentDiv.textContent = aiContent;
-
-                        console.log('Generated SQL:', data.content);
-                    }}
-
-                else if (data.type === 'query_started') {{
-                        console.log(data.content);
-
-                        const statusDiv = document.getElementById(
-                            'query-status-{user_message.id}'
-                        );
-
-                        if (statusDiv) {{
-                            statusDiv.textContent = data.content;
-                        }}
-                    }}
-
-                else if (data.type === 'result') {{
-                       
-                    aiResultContent += data.content;
-                    resultDiv.textContent = aiResultContent;
-                    }}
-                else if (data.type === 'query_completed') {{
-                        console.log(data.content);
-
-                        const statusDiv = document.getElementById(
-                            'query-status-{user_message.id}'
-                        );
-
-                        if (statusDiv) {{
-                            statusDiv.textContent = data.content;
-                        }}
-                    }}
-                else if (data.type === 'done') {{
-                    timestampDiv.innerHTML =
-                        data.timestamp + ' • qwen2.5:3b';
-
-                    eventSource.close();
-
-                    const csrfToken =
-                        document.querySelector(
-                            '[name=csrfmiddlewaretoken]'
-                        );
-
-                    if (csrfToken) {{
-                        fetch(
-                            '/chat/{conversation.id}/render-markdown/',
-                            {{
-                                method: 'POST',
-                                headers: {{
-                                    'Content-Type': 'application/json',
-                                    'X-CSRFToken': csrfToken.value
-                                }},
-                                body: JSON.stringify({{
-                                    content: aiContent
-                                }})
-                            }}
-                        )
-                        .then(response => response.text())
-                        .then(html => {{
-                            contentDiv.innerHTML = html;
-                            hljs.highlightAll();
-                        }});
-                    }}
-                    else {{
-                        contentDiv.innerHTML = aiContent;
-                    }}
-                }}
-
-                else if (data.type === 'error') {{
-                    contentDiv.innerHTML =
-                        '<em>Error: ' +
-                        data.content +
-                        '</em>';
-
-                    eventSource.close();
-                }}
-            }};
-
-            eventSource.onerror = function (event) {{
-                console.error('SSE error:', event);
-                console.error(
-                    'ReadyState:',
-                    eventSource.readyState
-                );
-
-                eventSource.close();
-
-                contentDiv.innerHTML =
-                    '<em>Error: Connection lost.</em>';
-            }};
-        }})();
-    </script>
 """
         )
