@@ -220,6 +220,11 @@ jobs:
               -f docker-compose.deployment.yml \
               pull
 
+            # run migrations
+            docker compose \
+            --env-file .env \
+            -f docker-compose.deployment.yml \
+            run --rm migrate
 
 
 
@@ -255,10 +260,10 @@ jobs:
             docker image prune -af
 
             ####################################################
-            # run migrations
+            # Deployment status
             ####################################################
-            echo "=== Running Migrations ==="
-            docker exec chat-llm python manage.py migrate
+            echo "=== Running Docker containers ==="
+            docker ps
 
             echo "=== Docker Compose services ==="
             docker compose \
@@ -270,7 +275,7 @@ jobs:
 
             echo "Waiting for API to become healthy..."
 
-            until [ "$(docker inspect -f '{{.State.Health.Status}}' chat-llm)" = "healthy" ]; do
+            until [ "$(docker inspect -f '{{.State.Health.Status}}' education-api)" = "healthy" ]; do
                 sleep 2
             done
 
