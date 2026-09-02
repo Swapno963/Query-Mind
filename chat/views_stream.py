@@ -242,154 +242,70 @@ class StreamChatViewGraph(SingleObjectMixin, View):
             connection_id=0,
         )
 
-        graph = build_on_premise_graph()
+        # graph = build_on_premise_graph()
 
-        final_state = None
+        # final_state = None
 
-        for event in graph.stream(state):
-            print("\n========== GRAPH EVENT ==========")
-            print(event)
+        # for event in graph.stream(state):
+        #     print("\n========== GRAPH EVENT ==========")
+        #     print(event)
 
-            final_state = event
-
-        return final_state.get("sql")
-        # prompt_generator = PromptGenerator()
-
-        # prompt = prompt_generator.generate(
-        #     question=user_message.content,
-        #     conversation_context=conversation_context,
-        # )
+        #     final_state = event
 
         def generate():
             """Generator function for SSE streaming"""
-            full_response = ""
+
+            final_state = None
 
             try:
-                # Use synchronous httpx client with stream
-                with httpx.Client(timeout=60.0) as client:
-                    with client.stream(
-                        "POST",
-                        OLLAMA_CHAT_ENDPOINT,
-                        json={
-                            "model": OLLAMA_MODEL,
-                            "messages": [
-                                {
-                                    "role": "user",
-                                    "content": prompt,
-                                }
-                            ],
-                            "stream": True,
-                        },
-                    ) as response:
-                        for line in response.iter_lines():
-                            # print("OLLAMA RAW:", repr(line))
+                graph = build_on_premise_graph()
 
-                            if line:
-                                try:
-                                    data = json.loads(line)
-                                    # print("OLLAMA JSON:", data)
-                                    if (
-                                        "message" in data
-                                        and "content" in data["message"]
-                                    ):
-                                        token = data["message"]["content"]
-                                        full_response += token
-                                        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
-                                except json.JSONDecodeError:
-                                    continue
-                                except Exception as e:
-                                    yield f"data: {json.dumps({'type': 'error', 'content': f'Parse error: {str(e)}'})}\n\n"
-            except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'content': f'Connection error: {str(e)}'})}\n\n"
-                return
+                for event in graph.stream(state):
 
-            # new code
-            if full_response:
-                sql = full_response.strip()
+                    print("\n========== GRAPH EVENT ==========")
+                    print(event)
 
-                print("Generated SQL:", sql)
+                    final_state = event
 
-                # Validate + execute only AFTER the LLM has finished
-                executor = ReadOnlySQLExecutor(
-                    database="client",
+                # Get final answer from result_formatter
+                final_answer = final_state.get("result_formatter", {}).get(
+                    "final_answer", ""
                 )
 
-                try:
-                    executor.validate(sql)
+                print("FINAL ANSWER:", final_answer)
 
+                if final_answer:
+
+                    # Stream the completed answer in chunks
+                    chunk_size = 5
+
+                    for i in range(0, len(final_answer), chunk_size):
+
+                        token = final_answer[i : i + chunk_size]
+
+                        yield f"data: {json.dumps({
+                            'type': 'result',
+                            'content': token,
+                        })}\n\n"
+
+                    # Done only AFTER all chunks have been sent
                     yield f"data: {json.dumps({
-                        'type': 'sql',
-                        'content': sql,
+                        'type': 'done',
                     })}\n\n"
 
-                    print("The user message is : ", user_message)
-                    rows = []
+            except Exception as e:
 
-                    for row in executor.stream(sql):
-                        rows.append(row)
-                    prompt_generator = SQLResultPromptGenerator()
+                yield f"data: {json.dumps({
+                    'type': 'error',
+                    'content': str(e),
+                })}\n\n"
 
-                    answer_prompt = prompt_generator.generate(
-                        user_question=user_message,
-                        sql=sql,
-                        rows=rows,
-                    )
-                    try:
-                        # Use synchronous httpx client with stream
-                        with httpx.Client(timeout=60.0) as client:
-                            with client.stream(
-                                "POST",
-                                OLLAMA_CHAT_ENDPOINT,
-                                json={
-                                    "model": OLLAMA_MODEL,
-                                    "messages": [
-                                        {
-                                            "role": "user",
-                                            "content": answer_prompt,
-                                        }
-                                    ],
-                                    "stream": True,
-                                },
-                            ) as response:
-                                for line in response.iter_lines():
-                                    # print("OLLAMA RAW:", repr(line))
+        response = StreamingHttpResponse(
+            generate(),
+            content_type="text/event-stream",
+        )
 
-                                    if line:
-                                        try:
-                                            data = json.loads(line)
-                                            # print("OLLAMA JSON:", data)
-                                            if (
-                                                "message" in data
-                                                and "content" in data["message"]
-                                            ):
-                                                token = data["message"]["content"]
-                                                full_response += token
-                                                yield f"data: {json.dumps({'type': 'result', 'content': token})}\n\n"
-                                        except json.JSONDecodeError:
-                                            continue
-                                        except Exception as e:
-                                            yield f"data: {json.dumps({'type': 'error', 'content': f'Parse error: {str(e)}'})}\n\n"
-                    except Exception as e:
-                        yield f"data: {json.dumps({'type': 'error', 'content': f'Connection error: {str(e)}'})}\n\n"
-                        return
-
-                    ai_message = ConversationService.add_ai_message(
-                        conversation, full_response
-                    )
-
-                    local_time = ai_message.timestamp.astimezone()
-                    timestamp_str = (
-                        local_time.strftime("%I:%M %p").lstrip("0").replace(" 0", " ")
-                    )
-
-                    yield f"data: {json.dumps({'type': 'done', 'timestamp': timestamp_str})}\n\n"
-                except Exception as e:
-                    yield f"data: {json.dumps({
-                        'type': 'error',
-                        'content': str(e),
-                    })}\n\n"
-
-        response = StreamingHttpResponse(generate(), content_type="text/event-stream")
         response["Cache-Control"] = "no-cache"
         response["X-Accel-Buffering"] = "no"
+
         return response
