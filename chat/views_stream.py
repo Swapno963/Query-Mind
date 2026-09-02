@@ -14,7 +14,8 @@ from .constants import ERROR_MESSAGES, OLLAMA_CHAT_ENDPOINT, OLLAMA_MODEL
 from connections.services.prompt import PromptGenerator
 from connections.services.sql_validation import ReadOnlySQLExecutor
 from connections.services.result_prompt import SQLResultPromptGenerator
-
+import time
+import random
 
 # for graph
 from agent.state import QueryMindState
@@ -276,19 +277,33 @@ class StreamChatViewGraph(SingleObjectMixin, View):
 
                 if final_answer:
 
-                    # Stream the completed answer in chunks
-                    chunk_size = 5
+                    # Dynamic chunk size
+                    min_chunk_size = 3
+                    max_chunk_size = 8
 
-                    for i in range(0, len(final_answer), chunk_size):
+                    position = 0
 
-                        token = final_answer[i : i + chunk_size]
+                    while position < len(final_answer):
+
+                        # Random chunk size
+                        chunk_size = random.randint(
+                            min_chunk_size,
+                            max_chunk_size,
+                        )
+
+                        token = final_answer[position : position + chunk_size]
+
+                        position += chunk_size
 
                         yield f"data: {json.dumps({
                             'type': 'result',
                             'content': token,
                         })}\n\n"
 
-                    # Done only AFTER all chunks have been sent
+                        # Small random delay to make it feel like streaming
+                        time.sleep(random.uniform(0.03, 0.08))
+
+                    # Done only after all chunks
                     yield f"data: {json.dumps({
                         'type': 'done',
                     })}\n\n"
