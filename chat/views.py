@@ -7,12 +7,9 @@ from django.utils.decorators import method_decorator
 from django.template.defaultfilters import linebreaksbr
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
-
 from .models import Conversation, Message
 from .services import ConversationService
-from .constants import (
-    ERROR_MESSAGES,
-)
+from .constants import ERROR_MESSAGES, AI_DISPLAY_NAME, AI_AVATAR_TEXT
 
 
 def render_markdown(content):
@@ -89,9 +86,7 @@ class ChatView(DetailView):
             )
 
         messages = list(conversation.messages.all())
-        pending_stream = (
-            messages[-1] if messages and messages[-1].is_user else None
-        )
+        pending_stream = messages[-1] if messages and messages[-1].is_user else None
 
         context.update(
             {
