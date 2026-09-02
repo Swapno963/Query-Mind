@@ -44,57 +44,120 @@ def route_after_api_validation(state: QueryMindState) -> str:
     return "validated"
 
 
-# def build_on_premise_graph():
-#     workflow = StateGraph(QueryMindState)
+def route_after_on_premise_validation(state: QueryMindState) -> str:
+    """
+    Decide what happens after SQL validation in API mode.
 
-#     workflow.add_node("planner", planner)
-#     workflow.add_node("schema", schema)
-#     workflow.add_node("sql_generator", sql_generator)
-#     workflow.add_node("sql_validator", sql_validator)
-#     workflow.add_node("sql_executor", sql_executor)
-#     workflow.add_node("error_analyzer", error_analyzer)
-#     workflow.add_node("sql_repair", sql_repair)
-#     workflow.add_node("result_formatter", result_formatter)
+    Returns:
+        "validated" → SQL is valid, return it to the API client
+        "repair"    → SQL is invalid, send it to the repair node
+    """
+    print("========== SQL VALIDATION ROUTE ==========")
+    print("is_valid:", state.is_valid)
+    print("sql:", state.sql)
+    print("validation_error:", state.validation_error)
+    print("==========================================")
 
-#     workflow.add_edge(START, "planner")
+    # if state.is_valid:
+    #     return "validated"
 
-#     workflow.add_edge("planner", "schema")
-#     workflow.add_edge("schema", "sql_generator")
-#     workflow.add_edge("sql_generator", "sql_validator")
+    # return "repair"
+    return "validated"
 
-#     workflow.add_conditional_edges(
-#         "sql_validator",
-#         route_after_validation,
-#         {
-#             "execute": "sql_executor",
-#             "repair": "sql_repair",
-#         },
-#     )
 
-#     workflow.add_edge("sql_repair", "sql_validator")
+def route_after_on_premise_execution(state: QueryMindState) -> str:
+    """
+    Decide what happens after SQL validation in API mode.
 
-#     workflow.add_conditional_edges(
-#         "sql_executor",
-#         route_after_execution,
-#         {
-#             "success": "result_formatter",
-#             "error": "error_analyzer",
-#         },
-#     )
+    Returns:
+        "validated" → SQL is valid, return it to the API client
+        "repair"    → SQL is invalid, send it to the repair node
+    """
+    print("========== SQL VALIDATION ROUTE ==========")
+    print("is_valid:", state.is_valid)
+    print("sql:", state.sql)
+    print("validation_error:", state.validation_error)
+    print("==========================================")
 
-#     workflow.add_conditional_edges(
-#         "error_analyzer",
-#         route_after_error_analysis,
-#         {
-#             "repair": "sql_repair",
-#             "schema": "schema",
-#             "end": END,
-#         },
-#     )
+    # if state.is_valid:
+    #     return "validated"
 
-#     workflow.add_edge("result_formatter", END)
+    # return "repair"
+    return "validated"
 
-#     return workflow.compile()
+
+def route_after_on_premise_error_analysis(state: QueryMindState) -> str:
+    """
+    Decide what happens after SQL validation in API mode.
+
+    Returns:
+        "validated" → SQL is valid, return it to the API client
+        "repair"    → SQL is invalid, send it to the repair node
+    """
+    print("========== SQL VALIDATION ROUTE ==========")
+    print("is_valid:", state.is_valid)
+    print("sql:", state.sql)
+    print("validation_error:", state.validation_error)
+    print("==========================================")
+
+    # if state.is_valid:
+    #     return "validated"
+
+    # return "repair"
+    return "validated"
+
+
+def build_on_premise_graph():
+    workflow = StateGraph(QueryMindState)
+
+    workflow.add_node("planner", planner)
+    workflow.add_node("schema", schema)
+    workflow.add_node("sql_generator", sql_generator)
+    workflow.add_node("sql_validator", sql_validator)
+    workflow.add_node("sql_executor", sql_executor)
+    workflow.add_node("error_analyzer", error_analyzer)
+    workflow.add_node("sql_repair", sql_repair)
+    workflow.add_node("result_formatter", result_formatter)
+
+    workflow.add_edge(START, "planner")
+
+    workflow.add_edge("planner", "schema")
+    workflow.add_edge("schema", "sql_generator")
+    workflow.add_edge("sql_generator", "sql_validator")
+
+    workflow.add_conditional_edges(
+        "sql_validator",
+        route_after_on_premise_validation,
+        {
+            "execute": "sql_executor",
+            "repair": "sql_repair",
+        },
+    )
+
+    workflow.add_edge("sql_repair", "sql_validator")
+
+    workflow.add_conditional_edges(
+        "sql_executor",
+        route_after_on_premise_execution,
+        {
+            "success": "result_formatter",
+            "error": "error_analyzer",
+        },
+    )
+
+    workflow.add_conditional_edges(
+        "error_analyzer",
+        route_after_on_premise_error_analysis,
+        {
+            "repair": "sql_repair",
+            "schema": "schema",
+            "end": END,
+        },
+    )
+
+    workflow.add_edge("result_formatter", END)
+
+    return workflow.compile()
 
 
 def build_api_query_graph():
