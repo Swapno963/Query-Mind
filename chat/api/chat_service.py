@@ -43,6 +43,7 @@ class ChatService:
 
         prompt = prompt_generator.generate(
             question=user_message.content,
+            schema="",
             conversation_context=conversation_context,
         )
 
@@ -302,12 +303,12 @@ class ChatService:
     @staticmethod
     def ask_on_premise_ai(prompt: str) -> str:
         try:
-            print("Request came on premis AI:")
+            # print("Request came on premis AI, and prompt is :", prompt)
 
             full_response = ""
 
             # Use synchronous HTTP client with streaming
-            with httpx.Client(timeout=60.0) as client:
+            with httpx.Client(timeout=100.0) as client:
                 with client.stream(
                     "POST",
                     OLLAMA_CHAT_ENDPOINT,
@@ -338,7 +339,7 @@ class ChatService:
 
                         except json.JSONDecodeError:
                             continue
-            print("The full response is : ", full_response)
+            # print("The full response is : ", full_response)
             return full_response
 
         except Exception as e:
@@ -365,7 +366,7 @@ class ChatService:
     @staticmethod
     def ask_ai2(prompt: str) -> str:
         try:
-            print("Request came to ai: ")
+            print("Request came to ai 2: ")
             api_key = os.getenv("GEMINI_API_KEY")
 
             # 1. Enforce strict HTTP transport timeout (e.g., 10 seconds)

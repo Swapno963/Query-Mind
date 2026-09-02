@@ -54,8 +54,8 @@ def sql_generator(state: QueryMindState) -> dict[str, Any]:
 
         prompt = prompt_generator.generate(
             question=question,
+            schema=state.schema,
             conversation_context=state.conversation_context,
-            # schema=state.schema,
         )
 
         # ========================================================
@@ -146,8 +146,8 @@ def sql_generator_on_premise(state: QueryMindState) -> dict[str, Any]:
 
         prompt = prompt_generator.generate(
             question=question,
+            schema=state.schema,
             conversation_context=state.conversation_context,
-            # schema=state.schema,
         )
 
         # ========================================================

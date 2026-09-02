@@ -7,6 +7,10 @@
 from typing import Any
 
 from ..state import QueryMindState
+import json
+from connections.services.prompt import PromptGenerator
+from chat.api.chat_service import ChatService
+from connections.services.prompt import SelectedSchema
 
 
 def schema(state: QueryMindState) -> dict[str, Any]:
@@ -25,20 +29,27 @@ def schema(state: QueryMindState) -> dict[str, Any]:
     """
 
     connection_id = state.connection_id
+    question = state.question.strip()
 
     try:
-        # --------------------------------------------------------
-        # Retrieve schema
-        # --------------------------------------------------------
+        prompt_generator = PromptGenerator()
 
-        # discovered_schema = discover_schema(
-        #     connection_id=connection_id,
-        # )
+        prompt = prompt_generator.generate_schema_selection_prompt(
+            question=question,
+            # schema=state.schema,
+            conversation_context=state.conversation_context,
+        )
+        # print("Schema prompt is : ", prompt)
+        # ========================================================
+        # 2. Ask LLM to generate SQL
+        # ========================================================
 
-        # --------------------------------------------------------
-        # Update state
-        # --------------------------------------------------------
-        discovered_schema = ""
+        discovered_schema = ChatService.ask_on_premise_ai(prompt)
+        # print("discovered_schema : ", discovered_schema)
+        selected_schema = json.loads(discovered_schema)
+
+        selected_schema = SelectedSchema.build_relevant_schema(selected_schema)
+        print("THe selected schema is : ", selected_schema)
         return {
             "schema": discovered_schema,
             "current_node": "schema",

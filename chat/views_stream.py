@@ -53,6 +53,7 @@ class StreamChatView(SingleObjectMixin, View):
 
         prompt = prompt_generator.generate(
             question=user_message.content,
+            schema="",
             conversation_context=conversation_context,
         )
 
@@ -258,15 +259,34 @@ class StreamChatViewGraph(SingleObjectMixin, View):
             """Generator function for SSE streaming"""
 
             final_state = None
-
+            STATUS_MESSAGES = {
+                "planner": "Understanding your question…",
+                "schema": "Selecting the relevant database schema…",
+                "sql_generator": "Generating SQL query…",
+                "sql_validator": "Validating SQL query…",
+                "sql_repair": "Fixing the SQL query…",
+                "sql_executor": "Running the query…",
+                "result_formatter": "Preparing the result…",
+            }
             try:
                 graph = build_on_premise_graph()
 
                 for event in graph.stream(state):
 
                     print("\n========== GRAPH EVENT ==========")
-                    print(event)
+                    # print(event.keys())
 
+                    first_key = next(iter(event.keys()))
+                    if first_key:
+                        status_message = STATUS_MESSAGES.get(
+                            first_key, "Processing your request…"
+                        )
+
+                        yield f"data: {json.dumps({
+                            'type': 'status',
+                            'content': status_message
+                        })}\n\n"
+                    print(first_key)
                     final_state = event
 
                 # Get final answer from result_formatter
@@ -275,7 +295,14 @@ class StreamChatViewGraph(SingleObjectMixin, View):
                 )
 
                 print("FINAL ANSWER:", final_answer)
+                ai_message = ConversationService.add_ai_message(
+                    conversation, final_answer
+                )
 
+                local_time = ai_message.timestamp.astimezone()
+                timestamp_str = (
+                    local_time.strftime("%I:%M %p").lstrip("0").replace(" 0", " ")
+                )
                 if final_answer:
 
                     # Dynamic chunk size
@@ -306,7 +333,7 @@ class StreamChatViewGraph(SingleObjectMixin, View):
 
                     # Done only after all chunks
                     yield f"data: {json.dumps({
-                        'type': 'done',
+                        'type': 'done', 'timestamp': timestamp_str
                     })}\n\n"
 
             except Exception as e:

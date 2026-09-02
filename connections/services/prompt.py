@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.utils import timezone
+import re
 
 from connections.models import DatabaseSchema
 from connections.services.schema_discovery import (
@@ -483,18 +484,159 @@ Notes: • customers table existed briefly and was dropped — not in final sche
 """
 
 
+class SelectedSchema:
+    @staticmethod
+    def build_relevant_schema(
+        selected_schema: dict,
+    ) -> str:
+
+        full_schema = local_schema
+        selected_tables = selected_schema.get("tables", {})
+
+        if not selected_tables:
+            return ""
+
+        result = ["DATABASE: PostgreSQL", ""]
+
+        # Find each TABLE block
+        table_pattern = re.compile(
+            r"(TABLE:\s+(\w+).*?)(?=\n\nTABLE:|\n\nRELATIONSHIPS:|\n\nBUSINESS DEFINITIONS:|$)",
+            re.DOTALL,
+        )
+
+        table_matches = table_pattern.findall(full_schema)
+
+        selected_table_names = set(selected_tables.keys())
+
+        # --------------------------------
+        # Extract selected tables/columns
+        # --------------------------------
+
+        for table_block, table_name in table_matches:
+
+            if table_name not in selected_table_names:
+                continue
+
+            selected_columns = set(selected_tables[table_name])
+
+            lines = table_block.splitlines()
+
+            output = []
+
+            for line in lines:
+
+                # Keep TABLE line
+                if line.startswith("TABLE:"):
+                    output.append(line)
+                    continue
+
+                # Keep Description
+                if line.startswith("Description:"):
+                    output.append(line)
+                    continue
+
+                # Keep "Columns:"
+                if line.strip() == "Columns:":
+                    output.append(line)
+                    continue
+
+                # Check column
+                match = re.match(
+                    r"^- (\w+)\s+(.+)$",
+                    line.strip(),
+                )
+
+                if match:
+                    column_name = match.group(1)
+
+                    if column_name in selected_columns:
+                        output.append(line)
+
+            if output:
+                result.extend(output)
+                result.append("")
+
+        # --------------------------------
+        # Add relevant relationships
+        # --------------------------------
+
+        relationships_match = re.search(
+            r"RELATIONSHIPS:\s*(.*?)(?=\n\nBUSINESS DEFINITIONS:|$)",
+            full_schema,
+            re.DOTALL,
+        )
+
+        if relationships_match:
+
+            relationships = []
+
+            for line in relationships_match.group(1).splitlines():
+
+                line = line.strip()
+
+                if not line.startswith("-"):
+                    continue
+
+                # Example:
+                # - orders.user_id → users.id
+
+                match = re.match(
+                    r"-\s+(\w+)\.(\w+)\s+→\s+(\w+)\.(\w+)",
+                    line,
+                )
+
+                if not match:
+                    continue
+
+                from_table = match.group(1)
+                from_column = match.group(2)
+                to_table = match.group(3)
+                to_column = match.group(4)
+
+                # Only include relationship if BOTH tables
+                # were selected by the AI
+                if (
+                    from_table in selected_table_names
+                    and to_table in selected_table_names
+                ):
+                    relationships.append(line)
+
+            if relationships:
+                result.append("RELATIONSHIPS:")
+                result.extend(relationships)
+                result.append("")
+
+        return "\n".join(result).strip()
+
+
 class PromptGenerator:
     SCHEMA_MAX_AGE = timedelta(days=7)
 
     def generate(
         self,
         question: str,
+        schema: any,
+        conversation_context: str = "",
+    ) -> str:
+        # schema = self._get_schema()
+        # schema = local_schema
+
+        return self._build_prompt(
+            question=question,
+            conversation_context=conversation_context,
+            schema=schema,
+        )
+
+    def generate_schema_selection_prompt(
+        self,
+        question: str,
+        # schema: any,
         conversation_context: str = "",
     ) -> str:
         # schema = self._get_schema()
         schema = local_schema
 
-        return self._build_prompt(
+        return self._build_schema_selector_prompt(
             question=question,
             conversation_context=conversation_context,
             schema=schema,
@@ -542,6 +684,105 @@ class PromptGenerator:
 
         return schema_data
 
+    def _format_business_definitions(self) -> str:
+        return "\n".join(
+            f"- {definition}" for definition in semantic_config["business_definitions"]
+        )
+
+    def _build_schema_selector_prompt(
+        self,
+        question: str,
+        conversation_context: str,
+        schema,
+    ) -> str:
+
+        return f"""
+    You are a database schema selection engine.
+
+    Your task is to identify which database tables and columns are required to answer the user's question.
+
+    You MUST select tables and columns ONLY from the provided database schema.
+
+    You MUST NOT invent:
+    - tables
+    - columns
+    - relationships
+    - values
+    - business rules
+
+    The selected schema will be passed to another AI that generates the SQL query.
+
+    DATABASE SCHEMA:
+
+    {schema}
+
+
+    BUSINESS DEFINITIONS:
+
+    {self._format_business_definitions()}
+
+
+    RELEVANT CONVERSATION CONTEXT:
+
+    {conversation_context or "No previous conversation context."}
+
+
+    CURRENT USER QUESTION:
+
+    {question}
+
+
+    SELECTION RULES:
+
+    1. Select only tables that are required to answer the question.
+    2. Select only columns that are required to:
+    - answer the question
+    - filter the data
+    - join tables
+    - group the data
+    - sort the data
+    - calculate aggregates
+    3. If a JOIN is required, include the relevant foreign-key columns from both tables.
+    4. Use the provided relationships when determining required JOINs.
+    5. Follow the business definitions exactly.
+    6. Do not select unrelated tables or columns.
+    7. Do not invent columns or tables.
+    8. If the question can be answered using one table, do not select additional tables.
+    9. If the question cannot be answered using the provided schema, return an empty selection.
+    10. The current user question has the highest priority over conversation context.
+
+    OUTPUT FORMAT:
+
+    Return ONLY valid JSON.
+
+    The JSON must have exactly this structure:
+
+    {{
+        "tables": {{
+            "table_name": [
+                "column_name"
+            ]
+        }}
+    }}
+
+    Example:
+
+    {{
+        "tables": {{
+            "orders": [
+                "id",
+                "payment_status",
+                "total_amount"
+            ]
+        }}
+    }}
+
+    Do not include markdown.
+    Do not include ```json.
+    Do not include explanations.
+    Do not include comments.
+    """.strip()
+
     def _build_prompt(
         self,
         question: str,
@@ -550,50 +791,55 @@ class PromptGenerator:
     ) -> str:
 
         return f"""
-You are a SQL generation engine.
+    You are a SQL generation engine.
 
-Your task is to convert the user's natural-language question into a valid PostgreSQL SQL query.
+    Your task is to convert the user's natural-language question into a valid PostgreSQL SQL query.
 
-Use the provided database schema, business definitions, and relevant conversation context.
+    Use ONLY the provided relevant database schema, business definitions,
+    and relevant conversation context.
 
-DATABASE SCHEMA:
+    RELEVANT DATABASE SCHEMA:
 
-{schema}
-
-
-BUSINESS DEFINITIONS:
-
-{self._format_business_definitions()}
+    {schema}
 
 
-RELEVANT CONVERSATION CONTEXT:
+    BUSINESS DEFINITIONS:
 
-{conversation_context or "No previous conversation context."}
-
-
-CURRENT USER QUESTION:
-
-{question}
+    {self._format_business_definitions()}
 
 
-RULES:
+    RELEVANT CONVERSATION CONTEXT:
 
-- Only use tables and columns listed in the database schema.
-- Never invent tables, columns, relationships, or values.
-- Use foreign-key relationships when JOINs are required.
-- Follow the business definitions exactly.
-- Use previous conversation context only when it is relevant to the current question.
-- The current user question has the highest priority.
-- Do not assume business rules that are not provided.
-- Generate only read-only SELECT queries.
-- Do not generate INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, CREATE, GRANT, REVOKE, or other write/DDL statements.
-- Generate valid PostgreSQL syntax.
-- Return only the SQL query.
-- Do not include markdown.
-- Do not include ```sql.
-- Do not include explanations.
-- Do not include comments.
-""".strip()
+    {conversation_context or "No previous conversation context."}
+
+
+    CURRENT USER QUESTION:
+
+    {question}
+
+
+    RULES:
+
+    - Only use tables and columns listed in the provided relevant database schema.
+    - Never invent tables, columns, relationships, or values.
+    - Use foreign-key relationships provided in the schema when JOINs are required.
+    - Follow the business definitions exactly.
+    - Use previous conversation context only when it is relevant to the current question.
+    - The current user question has the highest priority.
+    - Do not assume business rules that are not provided.
+    - Generate only read-only SELECT queries.
+    - Do not generate INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, CREATE, GRANT, REVOKE, or other write/DDL statements.
+    - Generate valid PostgreSQL syntax.
+    - Use appropriate PostgreSQL functions and syntax when necessary.
+    - Use table aliases when they improve readability.
+    - Only reference columns that are present in the provided schema.
+    - Only JOIN tables that are present in the provided schema.
+    - Return only the SQL query.
+    - Do not include markdown.
+    - Do not include ```sql.
+    - Do not include explanations.
+    - Do not include comments.
+    """.strip()
 
     def _format_business_definitions(self) -> str:
         return "\n".join(
