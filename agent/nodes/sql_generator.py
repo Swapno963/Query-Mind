@@ -12,6 +12,7 @@ from ..state import QueryMindState
 
 from connections.services.prompt import PromptGenerator
 from chat.constants import OLLAMA_CHAT_ENDPOINT, OLLAMA_MODEL
+from chat.api.chat_service import ChatService
 
 
 def sql_generator(state: QueryMindState) -> dict[str, Any]:
@@ -33,6 +34,7 @@ def sql_generator(state: QueryMindState) -> dict[str, Any]:
     - stream SSE events
     - generate the final answer
     """
+    print("Came to sql generator")
 
     question = state.question.strip()
 
@@ -53,16 +55,16 @@ def sql_generator(state: QueryMindState) -> dict[str, Any]:
         prompt = prompt_generator.generate(
             question=question,
             conversation_context=state.conversation_context,
-            schema=state.schema,
+            # schema=state.schema,
         )
 
         # ========================================================
         # 2. Ask LLM to generate SQL
         # ========================================================
 
-        sql = _generate_sql_from_ollama(prompt)
+        sql = ChatService.ask_ai(prompt)
 
-        sql = sql.strip()
+        # sql = sql.strip()
 
         # ========================================================
         # 3. Make sure we actually received SQL
@@ -88,6 +90,7 @@ def sql_generator(state: QueryMindState) -> dict[str, Any]:
         }
 
     except httpx.HTTPError as exc:
+        print("error : ", exc)
         return {
             "database_error": f"LLM request failed: {exc}",
             "current_node": "sql_generator",
@@ -95,6 +98,8 @@ def sql_generator(state: QueryMindState) -> dict[str, Any]:
         }
 
     except Exception as exc:
+        print("error : ", exc)
+
         return {
             "database_error": str(exc),
             "current_node": "sql_generator",

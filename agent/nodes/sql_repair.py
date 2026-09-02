@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 
 from connections.services.prompt import PromptGenerator
-from connections.constants import OLLAMA_CHAT_ENDPOINT, OLLAMA_MODEL
+from chat.api.chat_service import ChatService
 
 from ..state import QueryMindState
 
@@ -102,7 +102,7 @@ def sql_repair(state: QueryMindState) -> dict[str, Any]:
     # ============================================================
 
     try:
-        repaired_sql = _call_ollama(prompt)
+        repaired_sql = ChatService.ask_ai(prompt)
 
     except Exception as exc:
 
@@ -184,9 +184,9 @@ def _build_repair_prompt(
     )
 
     return f"""
-You are a PostgreSQL SQL repair engine.
+You are a  SQL repair engine.
 
-Your task is to repair an SQL query that failed against a PostgreSQL database.
+Your task is to repair an SQL query that failed against a  database.
 
 You MUST use the database schema provided below.
 
@@ -234,32 +234,32 @@ Return only the repaired SQL.
 # ==================================================================
 
 
-def _call_ollama(prompt: str) -> str:
-    """
-    Send the repair prompt to Ollama and return the complete response.
-    """
+# def _call_ollama(prompt: str) -> str:
+#     """
+#     Send the repair prompt to Ollama and return the complete response.
+#     """
 
-    with httpx.Client(timeout=60.0) as client:
+#     with httpx.Client(timeout=60.0) as client:
 
-        response = client.post(
-            OLLAMA_CHAT_ENDPOINT,
-            json={
-                "model": OLLAMA_MODEL,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-                ],
-                "stream": False,
-            },
-        )
+#         response = client.post(
+#             OLLAMA_CHAT_ENDPOINT,
+#             json={
+#                 "model": OLLAMA_MODEL,
+#                 "messages": [
+#                     {
+#                         "role": "user",
+#                         "content": prompt,
+#                     }
+#                 ],
+#                 "stream": False,
+#             },
+#         )
 
-        response.raise_for_status()
+#         response.raise_for_status()
 
-        data = response.json()
+#         data = response.json()
 
-    return data.get("message", {}).get("content", "")
+#     return data.get("message", {}).get("content", "")
 
 
 # ==================================================================

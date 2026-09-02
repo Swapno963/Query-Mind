@@ -53,3 +53,5 @@ class QueryMindState:
 
     current_node: str | None = None
     status: str = "pending"
+    is_valid: str | None = None
+    validation_error: str | None = None

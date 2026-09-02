@@ -8,6 +8,15 @@ from typing import Any
 from connections.services.sql_validation import ReadOnlySQLExecutor
 
 from ..state import QueryMindState
+from chat.api.chat_service import SQLFallbackInterceptor
+
+ALLOWED_TENANT_TABLES = {
+    "users",
+    "password_reset_tokens",
+    "sessions",
+    "cache",
+    "cache_locks",
+}
 
 
 def sql_validator(state: QueryMindState) -> dict[str, Any]:
@@ -29,51 +38,10 @@ def sql_validator(state: QueryMindState) -> dict[str, Any]:
     - decide the next graph node
     """
 
-    sql = (state.sql or "").strip()
-
-    # ============================================================
-    # 1. Make sure SQL exists
-    # ============================================================
-
-    if not sql:
-        return {
-            "validation_result": {
-                "valid": False,
-                "error": "No SQL query was generated.",
-            },
-            "current_node": "sql_validator",
-            "status": "running",
-        }
-
-    # ============================================================
-    # 2. Validate SQL
-    # ============================================================
-
-    executor = ReadOnlySQLExecutor(
-        database="client",
-    )
-
     try:
-        expression = executor.validate(sql)
-
-        # ========================================================
-        # 3. Validation succeeded
-        # ========================================================
-
-        normalized_sql = expression.sql(
-            dialect="postgres",
+        is_fallback, fallback_reason = SQLFallbackInterceptor.analyze_query(
+            sql=state.sql, allowed_tables=ALLOWED_TENANT_TABLES
         )
-
-        return {
-            "sql": normalized_sql,
-            "validation_result": {
-                "valid": True,
-                "error": None,
-            },
-            "database_error": None,
-            "current_node": "sql_validator",
-            "status": "running",
-        }
 
     except Exception as exc:
 
@@ -83,10 +51,21 @@ def sql_validator(state: QueryMindState) -> dict[str, Any]:
 
         return {
             "validation_result": {
-                "valid": False,
+                "valid": is_fallback,
                 "error": str(exc),
+                "fallback_reason": str(fallback_reason),
             },
             "database_error": None,
             "current_node": "sql_validator",
             "status": "running",
         }
+
+    return {
+        "validation_result": {
+            "valid": bool(is_fallback),
+            "fallback_reason": (str(fallback_reason) if fallback_reason else None),
+        },
+        "database_error": None,
+        "current_node": "sql_validator",
+        "status": "running",
+    }

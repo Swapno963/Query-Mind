@@ -11,10 +11,6 @@ from typing import Any
 
 import httpx
 
-from connections.constants import (
-    OLLAMA_CHAT_ENDPOINT,
-    OLLAMA_MODEL,
-)
 
 from ..state import QueryMindState
 
@@ -202,22 +198,23 @@ def _call_ollama(prompt: str) -> str:
 
     with httpx.Client(timeout=60.0) as client:
 
-        response = client.post(
-            OLLAMA_CHAT_ENDPOINT,
-            json={
-                "model": OLLAMA_MODEL,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-                ],
-                "stream": False,
-            },
-        )
+        # response = client.post(
+        #     ,
+        #     json={
+        #         "model": OLLAMA_MODEL,
+        #         "messages": [
+        #             {
+        #                 "role": "user",
+        #                 "content": prompt,
+        #             }
+        #         ],
+        #         "stream": False,
+        #     },
+        # )
 
-        response.raise_for_status()
+        # response.raise_for_status()
 
-        data = response.json()
+        # data = response.json()
 
-    return data.get("message", {}).get("content", "")
+        # return data.get("message", {}).get("content", "")
+        return ""

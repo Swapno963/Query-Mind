@@ -16,11 +16,11 @@ from .nodes.error_analyzer import error_analyzer
 from .nodes.sql_repair import sql_repair
 from .nodes.result_formatter import result_formatter
 
-from .edges.routing import (
-    route_after_validation,
-    route_after_execution,
-    route_after_error_analysis,
-)
+# from .edges.routing import (
+#     route_after_validation,
+#     route_after_execution,
+#     route_after_error_analysis,
+# )
 
 
 def route_after_api_validation(state: QueryMindState) -> str:
@@ -31,64 +31,70 @@ def route_after_api_validation(state: QueryMindState) -> str:
         "validated" → SQL is valid, return it to the API client
         "repair"    → SQL is invalid, send it to the repair node
     """
+    print("========== SQL VALIDATION ROUTE ==========")
+    print("is_valid:", state.is_valid)
+    print("sql:", state.sql)
+    print("validation_error:", state.validation_error)
+    print("==========================================")
 
-    if state.get("is_valid"):
-        return "validated"
+    # if state.is_valid:
+    #     return "validated"
 
-    return "repair"
+    # return "repair"
+    return "validated"
 
 
-def build_on_premise_graph():
-    workflow = StateGraph(QueryMindState)
+# def build_on_premise_graph():
+#     workflow = StateGraph(QueryMindState)
 
-    workflow.add_node("planner", planner)
-    workflow.add_node("schema", schema)
-    workflow.add_node("sql_generator", sql_generator)
-    workflow.add_node("sql_validator", sql_validator)
-    workflow.add_node("sql_executor", sql_executor)
-    workflow.add_node("error_analyzer", error_analyzer)
-    workflow.add_node("sql_repair", sql_repair)
-    workflow.add_node("result_formatter", result_formatter)
+#     workflow.add_node("planner", planner)
+#     workflow.add_node("schema", schema)
+#     workflow.add_node("sql_generator", sql_generator)
+#     workflow.add_node("sql_validator", sql_validator)
+#     workflow.add_node("sql_executor", sql_executor)
+#     workflow.add_node("error_analyzer", error_analyzer)
+#     workflow.add_node("sql_repair", sql_repair)
+#     workflow.add_node("result_formatter", result_formatter)
 
-    workflow.add_edge(START, "planner")
+#     workflow.add_edge(START, "planner")
 
-    workflow.add_edge("planner", "schema")
-    workflow.add_edge("schema", "sql_generator")
-    workflow.add_edge("sql_generator", "sql_validator")
+#     workflow.add_edge("planner", "schema")
+#     workflow.add_edge("schema", "sql_generator")
+#     workflow.add_edge("sql_generator", "sql_validator")
 
-    workflow.add_conditional_edges(
-        "sql_validator",
-        route_after_validation,
-        {
-            "execute": "sql_executor",
-            "repair": "sql_repair",
-        },
-    )
+#     workflow.add_conditional_edges(
+#         "sql_validator",
+#         route_after_validation,
+#         {
+#             "execute": "sql_executor",
+#             "repair": "sql_repair",
+#         },
+#     )
 
-    workflow.add_edge("sql_repair", "sql_validator")
+#     workflow.add_edge("sql_repair", "sql_validator")
 
-    workflow.add_conditional_edges(
-        "sql_executor",
-        route_after_execution,
-        {
-            "success": "result_formatter",
-            "error": "error_analyzer",
-        },
-    )
+#     workflow.add_conditional_edges(
+#         "sql_executor",
+#         route_after_execution,
+#         {
+#             "success": "result_formatter",
+#             "error": "error_analyzer",
+#         },
+#     )
 
-    workflow.add_conditional_edges(
-        "error_analyzer",
-        route_after_error_analysis,
-        {
-            "repair": "sql_repair",
-            "schema": "schema",
-            "end": END,
-        },
-    )
+#     workflow.add_conditional_edges(
+#         "error_analyzer",
+#         route_after_error_analysis,
+#         {
+#             "repair": "sql_repair",
+#             "schema": "schema",
+#             "end": END,
+#         },
+#     )
 
-    workflow.add_edge("result_formatter", END)
+#     workflow.add_edge("result_formatter", END)
 
-    return workflow.compile()
+#     return workflow.compile()
 
 
 def build_api_query_graph():
