@@ -50,6 +50,72 @@ semantic_config = {
 }
 
 
+local_schema = """
+DATABASE: PostgreSQL
+
+TABLE: order_items
+Description: Products contained in an order.
+
+Columns:
+- id INTEGER PRIMARY KEY NOT NULL
+- order_id INTEGER NOT NULL → orders.id
+- product_id INTEGER NOT NULL → products.id
+- quantity INTEGER NOT NULL
+- unit_price NUMERIC NOT NULL
+
+
+TABLE: orders
+Description: Customer purchase orders.
+
+Columns:
+- id INTEGER PRIMARY KEY NOT NULL
+- user_id INTEGER NOT NULL → users.id
+- status VARCHAR NOT NULL
+  Values: PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED
+- payment_status VARCHAR NOT NULL
+  Values: UNPAID, PAID, REFUNDED
+- total_amount NUMERIC NOT NULL
+- ordered_at TIMESTAMPTZ NOT NULL
+
+
+TABLE: products
+Description: Products available for sale.
+
+Columns:
+- id INTEGER PRIMARY KEY NOT NULL
+- name VARCHAR NOT NULL
+- description TEXT
+- price NUMERIC NOT NULL
+- stock INTEGER NOT NULL
+- is_active BOOLEAN NOT NULL
+- created_at TIMESTAMPTZ NOT NULL
+
+
+TABLE: users
+Description: Application users.
+
+Columns:
+- id INTEGER PRIMARY KEY NOT NULL
+- name VARCHAR NOT NULL
+- email VARCHAR NOT NULL UNIQUE
+- is_active BOOLEAN NOT NULL
+- created_at TIMESTAMPTZ NOT NULL
+
+
+RELATIONSHIPS:
+
+- order_items.order_id → orders.id
+- order_items.product_id → products.id
+- orders.user_id → users.id
+
+
+BUSINESS DEFINITIONS:
+
+- "unpaid" means orders.payment_status = 'UNPAID'
+- "paid" means orders.payment_status = 'PAID'
+- "revenue" means SUM(orders.total_amount) for paid orders
+"""
+
 multi_tenent_schema = """
 DATABASE: MySQL (per-tenant database, e.g. tenant_{store_name})
 
@@ -426,7 +492,7 @@ class PromptGenerator:
         conversation_context: str = "",
     ) -> str:
         # schema = self._get_schema()
-        schema = multi_tenent_schema
+        schema = local_schema
 
         return self._build_prompt(
             question=question,

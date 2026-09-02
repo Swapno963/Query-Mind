@@ -44,7 +44,8 @@ media_root/
 
 
 deployment.md
-
+ 
+.env
 
 
 # Terraform

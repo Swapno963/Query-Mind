@@ -1,7 +1,8 @@
 from connections.services.prompt import PromptGenerator
 from connections.services.prompt import PromptGenerator
 import traceback
-
+import httpx
+import json
 from connections.services.result_prompt import SQLResultPromptGenerator
 from google import genai
 import os
@@ -11,6 +12,7 @@ from google.genai import types
 import re
 from rest_framework import status
 from rest_framework.response import Response
+from chat.constants import ERROR_MESSAGES, OLLAMA_CHAT_ENDPOINT, OLLAMA_MODEL
 
 
 class ChatService:
@@ -288,6 +290,56 @@ class ChatService:
             # Accumulate text chunks as they arrive over the wire
             full_text = "".join(chunk.text for chunk in response_stream if chunk.text)
             return full_text
+
+        except Exception as e:
+            print("AI request failed:")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {e}")
+            traceback.print_exc()
+
+            return "Sorry, I couldn't process your request right now. Please try again later."
+
+    @staticmethod
+    def ask_on_premise_ai(prompt: str) -> str:
+        try:
+            print("Request came on premis AI:")
+
+            full_response = ""
+
+            # Use synchronous HTTP client with streaming
+            with httpx.Client(timeout=60.0) as client:
+                with client.stream(
+                    "POST",
+                    OLLAMA_CHAT_ENDPOINT,
+                    json={
+                        "model": OLLAMA_MODEL,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": prompt,
+                            }
+                        ],
+                        "stream": True,
+                    },
+                ) as response:
+
+                    response.raise_for_status()
+
+                    for line in response.iter_lines():
+                        if not line:
+                            continue
+
+                        try:
+                            data = json.loads(line)
+
+                            if "message" in data and "content" in data["message"]:
+                                token = data["message"]["content"]
+                                full_response += token
+
+                        except json.JSONDecodeError:
+                            continue
+            print("The full response is : ", full_response)
+            return full_response
 
         except Exception as e:
             print("AI request failed:")

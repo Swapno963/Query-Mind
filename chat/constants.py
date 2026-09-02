@@ -4,7 +4,7 @@
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_CHAT_ENDPOINT = f"{OLLAMA_BASE_URL}/api/chat"
 OLLAMA_MODEL = "qwen2.5:3b"
-OLLAMA_TIMEOUT = 60.0  # seconds
+OLLAMA_TIMEOUT = 100.0  # seconds
 OLLAMA_STREAM_TIMEOUT = 60.0
 
 

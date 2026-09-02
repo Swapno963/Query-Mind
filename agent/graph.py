@@ -9,7 +9,7 @@ from .state import QueryMindState
 
 from .nodes.planner import planner
 from .nodes.schema import schema, schema_shared_by_user
-from .nodes.sql_generator import sql_generator
+from .nodes.sql_generator import sql_generator, sql_generator_on_premise
 from .nodes.sql_validator import sql_validator
 from .nodes.sql_executor import sql_executor
 from .nodes.error_analyzer import error_analyzer
@@ -62,7 +62,7 @@ def route_after_on_premise_validation(state: QueryMindState) -> str:
     #     return "validated"
 
     # return "repair"
-    return "validated"
+    return "execute"
 
 
 def route_after_on_premise_execution(state: QueryMindState) -> str:
@@ -83,7 +83,7 @@ def route_after_on_premise_execution(state: QueryMindState) -> str:
     #     return "validated"
 
     # return "repair"
-    return "validated"
+    return "success"
 
 
 def route_after_on_premise_error_analysis(state: QueryMindState) -> str:
@@ -104,7 +104,7 @@ def route_after_on_premise_error_analysis(state: QueryMindState) -> str:
     #     return "validated"
 
     # return "repair"
-    return "validated"
+    return "end"
 
 
 def build_on_premise_graph():
@@ -112,7 +112,7 @@ def build_on_premise_graph():
 
     workflow.add_node("planner", planner)
     workflow.add_node("schema", schema)
-    workflow.add_node("sql_generator", sql_generator)
+    workflow.add_node("sql_generator", sql_generator_on_premise)
     workflow.add_node("sql_validator", sql_validator)
     workflow.add_node("sql_executor", sql_executor)
     workflow.add_node("error_analyzer", error_analyzer)

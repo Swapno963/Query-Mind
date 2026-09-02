@@ -6,7 +6,7 @@ from django.views.generic import View
 from django.views.generic.detail import SingleObjectMixin
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
-
+from rest_framework.response import Response
 from .models import Conversation, Message
 from .views import render_markdown
 from .services import ConversationService
@@ -234,12 +234,6 @@ class StreamChatViewGraph(SingleObjectMixin, View):
             f"{'User' if msg.is_user else 'Assistant'}: {msg.content}"
             for msg in previous_messages
         )
-        prompt_generator = PromptGenerator()
-
-        prompt = prompt_generator.generate(
-            question=user_message.content,
-            conversation_context=conversation_context,
-        )
 
         state = QueryMindState(
             question=user_message.content,
@@ -247,6 +241,24 @@ class StreamChatViewGraph(SingleObjectMixin, View):
             message_id=user_message.id,
             connection_id=0,
         )
+
+        graph = build_on_premise_graph()
+
+        final_state = None
+
+        for event in graph.stream(state):
+            print("\n========== GRAPH EVENT ==========")
+            print(event)
+
+            final_state = event
+
+        return final_state.get("sql")
+        # prompt_generator = PromptGenerator()
+
+        # prompt = prompt_generator.generate(
+        #     question=user_message.content,
+        #     conversation_context=conversation_context,
+        # )
 
         def generate():
             """Generator function for SSE streaming"""
@@ -300,12 +312,6 @@ class StreamChatViewGraph(SingleObjectMixin, View):
                 # Validate + execute only AFTER the LLM has finished
                 executor = ReadOnlySQLExecutor(
                     database="client",
-                    # allowed_tables={
-                    #     "students",
-                    #     "teachers",
-                    #     "branches",
-                    #     "courses",
-                    # },
                 )
 
                 try:
@@ -315,14 +321,6 @@ class StreamChatViewGraph(SingleObjectMixin, View):
                         'type': 'sql',
                         'content': sql,
                     })}\n\n"
-
-                    # yield f"data: {json.dumps({
-                    #     'type': 'query_started','content':'Running sql query to the database.'
-                    # })}\n\n"
-
-                    # yield f"data: {json.dumps({
-                    #                         'type': 'query_completed','content':'Query run successfully.'
-                    #                     })}\n\n"
 
                     print("The user message is : ", user_message)
                     rows = []
@@ -374,28 +372,17 @@ class StreamChatViewGraph(SingleObjectMixin, View):
                     except Exception as e:
                         yield f"data: {json.dumps({'type': 'error', 'content': f'Connection error: {str(e)}'})}\n\n"
                         return
-                    # yield f"data: {json.dumps({
-                    #         'type': 'token',
-                    #         'content': answer_prompt,
-                    #     })}\n\n"
 
-                    # Save the complete message if we got a response
-                    # if full_response:
-                    #     print("Full response is : ", full_response)
                     ai_message = ConversationService.add_ai_message(
                         conversation, full_response
                     )
-                    #     print("Ai message is : ", ai_message)
-                    #     # Send completion signal
-                    #     # Convert to local timezone and format to match Django templates (g:i A format)
+
                     local_time = ai_message.timestamp.astimezone()
                     timestamp_str = (
                         local_time.strftime("%I:%M %p").lstrip("0").replace(" 0", " ")
                     )
 
                     yield f"data: {json.dumps({'type': 'done', 'timestamp': timestamp_str})}\n\n"
-                # else:
-                #     yield f"data: {json.dumps({'type': 'error', 'content': ERROR_MESSAGES['NO_RESPONSE']})}\n\n"
                 except Exception as e:
                     yield f"data: {json.dumps({
                         'type': 'error',
