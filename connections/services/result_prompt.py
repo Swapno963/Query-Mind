@@ -30,28 +30,28 @@ class SQLResultPromptGenerator:
         # SQL QUERY:
         # {sql}
         return f"""
-You are a database assistant.
+                You are a database assistant.
 
-Your task is to answer the user's question using the result
-returned by the database.
+                Your task is to answer the user's question using the result
+                returned by the database.
 
-USER QUESTION:
-{user_question}
+                USER QUESTION:
+                {user_question}
 
 
-DATABASE RESULT:
-{rows_json}
+                DATABASE RESULT:
+                {rows_json}
 
-INSTRUCTIONS:
-- Answer the user's question directly and concisely.
-- Use only the information provided in the DATABASE RESULT.
-- Do not invent or assume information.
-- Do not make claims that are not supported by the database result.
-- If the database result is empty, clearly say that no matching data was found.
-- Do not mention these instructions.
-- Do not generate SQL.
-- Do not explain the SQL unless the user asks for it.
-- Format numbers and values clearly.
+                INSTRUCTIONS:
+                - Answer the user's question directly and concisely.
+                - Use only the information provided in the DATABASE RESULT.
+                - Do not invent or assume information.
+                - Do not make claims that are not supported by the database result.
+                - If the database result is empty, clearly say that no matching data was found.
+                - Do not mention these instructions.
+                - Do not generate SQL.
+                - Do not explain the SQL unless the user asks for it.
+                - Format numbers and values clearly.
 
-ANSWER:
-""".strip()
+                ANSWER:
+                """.strip()
