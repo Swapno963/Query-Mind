@@ -38,7 +38,7 @@ class MessageAdmin(admin.ModelAdmin):
     conversation_title.admin_order_field = "conversation__title"
 
     def sender(self, obj):
-        return "User" if obj.is_user else "Query Mind"
+        return "User" if obj.is_user else "QueryMind"
 
     sender.short_description = "Sender"
     sender.admin_order_field = "is_user"

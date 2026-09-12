@@ -1,7 +1,8 @@
 import markdown
-from django.shortcuts import redirect, get_object_or_404
+from django.shortcuts import redirect, get_object_or_404, render
 from django.http import HttpResponse
-from django.views.generic import ListView, DetailView
+from django.views import View
+from django.views.generic import ListView, DetailView, TemplateView
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.template.defaultfilters import linebreaksbr
@@ -9,7 +10,8 @@ from django.utils.html import escape
 from django.utils.safestring import mark_safe
 from .models import Conversation, Message
 from .services import ConversationService
-from .constants import ERROR_MESSAGES, AI_DISPLAY_NAME, AI_AVATAR_TEXT
+from .constants import ERROR_MESSAGES, AI_AVATAR_TEXT
+from .ui import product_context
 
 
 def render_markdown(content):
@@ -24,23 +26,106 @@ def render_markdown(content):
     return mark_safe(md.convert(escape(content)))
 
 
-@method_decorator(csrf_exempt, name="dispatch")
-class HomepageView(ListView):
-    """Claude.ai-style homepage showing recent conversations"""
+class LandingView(TemplateView):
+    template_name = "landing.html"
 
+
+class LoginView(View):
+    def get(self, request):
+        return render(request, "auth/login.html")
+
+    def post(self, request):
+        request.session["querymind_signed_in"] = True
+        request.session["querymind_name"] = request.POST.get("email", "").split("@")[0]
+        if request.session.get("querymind_onboarded"):
+            return redirect("ask")
+        return redirect("onboarding")
+
+
+class RegisterView(View):
+    def get(self, request):
+        return render(request, "auth/register.html")
+
+    def post(self, request):
+        request.session["querymind_signed_in"] = True
+        request.session["querymind_name"] = request.POST.get("name") or "Workspace"
+        return redirect("onboarding")
+
+
+class OnboardingView(View):
+    def get(self, request):
+        return render(
+            request,
+            "onboarding/wizard.html",
+            product_context(request, {"active_nav": "onboarding"}),
+        )
+
+    def post(self, request):
+        allowed = request.POST.getlist("allowed_tables")
+        keeps = request.POST.getlist("keeps")
+        paste = request.POST.get("schema_paste", "")
+        discovered = []
+        for line in paste.splitlines():
+            token = line.strip().split()[0] if line.strip() else ""
+            if token and token.isidentifier():
+                discovered.append(token)
+        if not discovered:
+            discovered = allowed or ["customers", "orders", "products", "payments"]
+        tables = []
+        for name in discovered:
+            tables.append(
+                {
+                    "name": name,
+                    "description": "Included in your knowledge profile",
+                    "allowed": name in allowed if allowed else True,
+                }
+            )
+        if allowed and not tables:
+            tables = [
+                {"name": name, "description": "Allowed by you", "allowed": True}
+                for name in allowed
+            ]
+        profile = {
+            "source_name": request.POST.get("database") or "Connected database",
+            "database": request.POST.get("database") or "PostgreSQL",
+            "business": request.POST.get("business") or "",
+            "industry": request.POST.get("industry") or "",
+            "keeps": keeps,
+            "tables": tables,
+            "updated_label": "just now",
+        }
+        request.session["querymind_profile"] = profile
+        request.session["querymind_onboarded"] = True
+        request.session["querymind_signed_in"] = True
+        return redirect("ask")
+
+
+class DataAccessView(View):
+    def get(self, request):
+        return render(
+            request,
+            "data_access.html",
+            product_context(request, {"active_nav": "data"}),
+        )
+
+
+class AskView(ListView):
     model = Conversation
     template_name = "homepage.html"
     context_object_name = "recent_conversations"
     queryset = Conversation.objects.all().order_by("-updated_at")[:20]
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(product_context(self.request, {"active_nav": "ask"}))
+        return context
+
     def post(self, request, *args, **kwargs):
-        """Handle new conversation creation from homepage"""
         message_content = request.POST.get("message", "").strip()
 
         if not message_content:
             return HttpResponse("Message cannot be empty", status=400)
 
-        # Create new conversation
         conversation = Conversation.objects.create(
             title=(
                 message_content[:50] + "..."
@@ -49,13 +134,14 @@ class HomepageView(ListView):
             )
         )
 
-        # Save the initial message
         Message.objects.create(
             conversation=conversation, content=message_content, is_user=True
         )
 
-        # Redirect to the new chat where streaming will occur
         return redirect("chat", conversation_id=conversation.id)
+
+
+HomepageView = AskView
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -71,14 +157,11 @@ class ChatView(DetailView):
         context = super().get_context_data(**kwargs)
         conversation = self.object
 
-        # Process messages for display
         messages_with_content = []
         for message in conversation.messages.all():
             if message.is_user:
-                # User messages: simple line breaks
                 formatted_content = linebreaksbr(escape(message.content))
             else:
-                # AI messages: render markdown
                 formatted_content = render_markdown(message.content)
 
             messages_with_content.append(
@@ -89,16 +172,15 @@ class ChatView(DetailView):
         pending_stream = messages[-1] if messages and messages[-1].is_user else None
 
         context.update(
-            {
-                "messages": conversation.messages.all(),
-                "messages_with_content": messages_with_content,
-                "recent_conversations": Conversation.objects.order_by("-updated_at")[
-                    :20
-                ],
-                "ai_display_name": AI_DISPLAY_NAME,
-                "ai_avatar_text": AI_AVATAR_TEXT,
-                "pending_stream": pending_stream,
-            }
+            product_context(
+                self.request,
+                {
+                    "messages": conversation.messages.all(),
+                    "messages_with_content": messages_with_content,
+                    "pending_stream": pending_stream,
+                    "active_nav": "ask",
+                },
+            )
         )
         return context
 
@@ -135,17 +217,18 @@ class ChatView(DetailView):
     <div class="message-row fade-in"
          data-stream-url="/chat/{cid}/stream/?message_id={mid}"
          data-message-id="{mid}"
-         data-conversation-id="{cid}"
-         data-model-name="{AI_DISPLAY_NAME}">
+         data-conversation-id="{cid}">
         <div class="ai-avatar">{AI_AVATAR_TEXT}</div>
         <div class="message-bubble ai-message">
-            <div class="stream-status visible" id="query-status-{mid}">Thinking…</div>
-            <details class="sql-panel" id="sql-panel-{mid}" hidden>
-                <summary>Generated SQL</summary>
-                <pre><code id="sql-code-{mid}"></code></pre>
-            </details>
+            <ul class="status-timeline" id="query-status-{mid}"></ul>
             <div class="markdown-content" id="ai-content-{mid}"></div>
             <div id="query-results-{mid}" class="query-results"></div>
+            <div class="error-card" id="error-card-{mid}" hidden></div>
+            <details class="how-answered" id="sql-panel-{mid}" hidden>
+                <summary>How this was answered</summary>
+                <p class="page-meta" id="answer-meta-{mid}"></p>
+                <pre><code id="sql-code-{mid}"></code></pre>
+            </details>
             <span class="msg-time" id="ai-timestamp-{mid}"></span>
         </div>
     </div>

@@ -23,16 +23,23 @@ MESSAGE_PREVIEW_LENGTH = 100
 ERROR_MESSAGES = {
     "EMPTY_MESSAGE": "Message cannot be empty",
     "MESSAGE_TOO_LONG": f"Message is too long (max {MAX_MESSAGE_LENGTH} characters)",
-    "OLLAMA_CONNECTION": "Could not connect to the local Qwen model",
-    "OLLAMA_ERROR": "Sorry, I'm having trouble connecting to Qwen 2.5 3B.",
-    "NO_RESPONSE": "No response received from the model",
+    "OLLAMA_CONNECTION": "QueryMind could not reach the answer service.",
+    "OLLAMA_ERROR": "QueryMind could not finish this answer. Try again in a moment.",
+    "NO_RESPONSE": "QueryMind did not receive an answer. It will not invent results.",
     "INVALID_JSON": "Invalid JSON in request",
 }
 
 
-# Model Display Names
-AI_DISPLAY_NAME = "Qwen 2.5 3B"
-AI_AVATAR_TEXT = "Q2.5"
+# Product display names (not the underlying model)
+AI_DISPLAY_NAME = "QueryMind"
+AI_AVATAR_TEXT = "QM"
+
+EXAMPLE_QUESTIONS = [
+    "How many products do we currently sell?",
+    "Which products are out of stock?",
+    "What are our latest orders?",
+    "How much revenue came from paid orders?",
+]
 
 
 # for gemini

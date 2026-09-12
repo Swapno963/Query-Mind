@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}QueryMind — Ask your data in plain English{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/public.css' %}">
+{% endblock %}
+{% block body_class %}public-body{% endblock %}
+
+{% block body %}
+<header class="public-nav">
+    <a class="brand public-brand" href="{% url 'landing' %}">
+        <div class="brand-mark">QM</div>
+        <div>
+            <div class="brand-name">QueryMind</div>
+            <div class="brand-sub">Ask your data</div>
+        </div>
+    </a>
+    <nav class="public-nav-links">
+        <a class="hide-sm" href="#how-it-works">How it works</a>
+        <a class="hide-sm" href="#trust">Trust</a>
+        <a href="{% url 'login' %}">Log in</a>
+        <a class="btn btn-primary" href="{% url 'register' %}">Get started</a>
+    </nav>
+</header>
+
+<section class="public-hero">
+    <h1>Ask your data in plain English.</h1>
+    <p>QueryMind gives non-SQL teams easy, controlled access to their own databases. You think in business questions. QueryMind handles the database complexity.</p>
+    <div class="hero-actions">
+        <a class="btn btn-primary" href="{% url 'register' %}">Get started</a>
+        <a class="btn btn-secondary" href="#how-it-works">See how it works</a>
+        <a class="btn btn-ghost" href="{% url 'login' %}">Log in</a>
+    </div>
+</section>
+
+<section class="public-section" id="how-it-works">
+    <h2 class="section-title">From “my data is in this database” to “ask QueryMind”</h2>
+    <p class="section-lead">After you subscribe, QueryMind builds context first. You do not start by chatting with an empty assistant.</p>
+    <div class="step-grid">
+        <article class="step-card"><div class="n">1</div><h3>Subscribe</h3><p>Create your workspace.</p></article>
+        <article class="step-card"><div class="n">2</div><h3>Tell us about your work</h3><p>What the business does and what you keep.</p></article>
+        <article class="step-card"><div class="n">3</div><h3>Describe your database</h3><p>Pick the system you already use.</p></article>
+        <article class="step-card"><div class="n">4</div><h3>Discover the structure</h3><p>Run a provided instruction, then paste the output.</p></article>
+        <article class="step-card"><div class="n">5</div><h3>Control access</h3><p>Choose which tables QueryMind may use.</p></article>
+        <article class="step-card"><div class="n">6</div><h3>Ask and get answers</h3><p>Questions in plain English. Trustworthy answers from your data.</p></article>
+    </div>
+</section>
+
+<section class="public-section">
+    <h2 class="section-title">Built for people who know the business</h2>
+    <p class="section-lead">You should not need to become a database expert to understand your own numbers.</p>
+    <div class="audience-grid">
+        <article class="audience-card"><h3>Business owners</h3><p>See sales, stock, and customers without waiting on a report.</p></article>
+        <article class="audience-card"><h3>Operations and finance</h3><p>Ask about orders, payments, and outstanding work in everyday language.</p></article>
+        <article class="audience-card"><h3>Schools, restaurants, shops</h3><p>Administrators keep the data they already have — and finally use it.</p></article>
+        <article class="audience-card"><h3>Analysts and developers</h3><p>A faster interface to data, with access still under your control.</p></article>
+    </div>
+</section>
+
+<section class="public-section" id="trust">
+    <h2 class="section-title">Trust is the product</h2>
+    <p class="section-lead">The most important question is not how intelligent the answer sounds. It is whether you can trust it.</p>
+    <div class="trust-grid">
+        <article class="trust-card"><h3>You choose the tables</h3><p>If you turn a table off, QueryMind behaves as if it does not exist.</p></article>
+        <article class="trust-card"><h3>Read-only by design</h3><p>QueryMind is here to look up information, not change your records.</p></article>
+        <article class="trust-card"><h3>Answers from your data</h3><p>No invented results. Unavailable information is labeled clearly, not as zero.</p></article>
+        <article class="trust-card"><h3>Credentials stay protected</h3><p>Your database stays yours. QueryMind only asks against what you allow.</p></article>
+    </div>
+</section>
+
+<section class="public-section">
+    <h2 class="section-title">Works with the databases you already have</h2>
+    <p class="section-lead">QueryMind is database-agnostic. These are the first systems we support.</p>
+    <div class="db-chips">
+        <span class="chip chip-muted">PostgreSQL</span>
+        <span class="chip chip-muted">MySQL</span>
+        <span class="chip chip-muted">Microsoft SQL Server</span>
+        <span class="chip chip-muted">Oracle Database</span>
+        <span class="chip chip-muted">MongoDB</span>
+    </div>
+</section>
+
+<footer class="public-footer">
+    <div>QueryMind — ask your data.</div>
+    <div>
+        <a href="#trust">Security</a>
+        <a href="#trust">Privacy</a>
+        <a href="mailto:hello@querymind.local">Contact</a>
+    </div>
+</footer>
+{% endblock %}

@@ -1,57 +1,57 @@
-{% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Query Mind</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'css/chat.css' %}">
-</head>
-<body>
-    <div class="app-shell">
-        <aside class="sidebar" id="sidebar">
-            <a class="brand" href="{% url 'homepage' %}">
-                <div class="brand-mark">QM</div>
-                <div>
-                    <div class="brand-name">Query Mind</div>
-                    <div class="brand-sub">Ask your data</div>
-                </div>
-            </a>
-            <button class="new-chat-btn" type="button" onclick="document.querySelector('textarea[name=message]').focus()">
-                <i class="bi bi-plus-lg"></i> New chat
-            </button>
-            {% if recent_conversations %}
-            <div class="sidebar-label">Recent</div>
-            <div class="sidebar-list">
-                {% for conv in recent_conversations %}
-                    <a href="{% url 'chat' conv.id %}" class="recent-chat-item">
-                        <div class="recent-chat-title">{{ conv.title }}</div>
-                        <div class="recent-chat-date">{{ conv.updated_at|date:"M j" }}</div>
-                    </a>
-                {% endfor %}
-            </div>
-            {% endif %}
-        </aside>
+{% extends "app_base.html" %}
 
-        <main class="hero">
-            <div class="hero-card">
-                <button class="mobile-menu-btn" type="button" style="position:absolute;top:1rem;left:1rem;" onclick="document.getElementById('sidebar').classList.toggle('show')">
-                    <i class="bi bi-list"></i>
-                </button>
-                <h1>Query Mind</h1>
-                <p>Ask a question in plain English. Query Mind writes the SQL, runs it, and explains the answer.</p>
-                <form method="post" action="{% url 'homepage' %}">
-                    {% csrf_token %}
-                    <div class="composer">
-                        <textarea name="message" rows="1" placeholder="e.g. How many students enrolled last month?" required autofocus></textarea>
-                        <button type="submit" class="send-btn" aria-label="Start chat">
-                            <i class="bi bi-arrow-up"></i>
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </main>
+{% block title %}Ask your data — QueryMind{% endblock %}
+
+{% block workspace %}
+<header class="page-header">
+    <div style="display:flex;align-items:center;gap:.75rem;">
+        <button class="mobile-menu-btn" type="button" data-sidebar-open aria-label="Open menu">
+            <i class="bi bi-list"></i>
+        </button>
+        <div>
+            <h1 class="page-title">Ask your data</h1>
+            <div class="page-meta">Plain-English questions. Answers from the tables you allow.</div>
+        </div>
     </div>
-</body>
-</html>
+    <div class="header-chips">
+        {% if data_ready %}
+            <span class="chip">{{ profile.source_name }}</span>
+            <span class="chip chip-success"><i class="bi bi-shield-check"></i> Read-only</span>
+        {% else %}
+            <span class="chip chip-muted">No data connected yet</span>
+        {% endif %}
+    </div>
+</header>
+
+{% if data_ready %}
+<div class="page-body" style="display:flex;flex-direction:column;">
+    <div class="ask-hero">
+        <h1>What do you want to know?</h1>
+        <p>Ask in the language you already use at work. QueryMind looks at the data you allowed.</p>
+        <div class="example-chips">
+            {% for q in example_questions %}
+            <button class="chip" type="button" data-fill-question="{{ q }}">{{ q }}</button>
+            {% endfor %}
+        </div>
+        <form method="post" action="{% url 'ask' %}">
+            {% csrf_token %}
+            <div class="composer">
+                <textarea id="message-input" name="message" rows="1" placeholder="Ask about your data…" required autofocus></textarea>
+                <button type="submit" class="send-btn" aria-label="Ask">
+                    <i class="bi bi-arrow-up"></i>
+                </button>
+            </div>
+            <div class="composer-hint">Answers come from your allowed tables only. Enter to send · Shift + Enter for a new line</div>
+        </form>
+    </div>
+</div>
+{% else %}
+<div class="page-body">
+    <div class="empty-setup">
+        <h1>Set up your data first</h1>
+        <p>QueryMind does not start with an empty chat. It needs to know your work, your database, and which tables it may use.</p>
+        <a class="btn btn-primary" href="{% url 'onboarding' %}">Set up your data</a>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

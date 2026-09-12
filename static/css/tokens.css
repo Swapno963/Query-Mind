@@ -1,0 +1,69 @@
+:root {
+    --bg: #f4f5f8;
+    --bg-warm: #eef0f5;
+    --surface: #ffffff;
+    --sidebar: #0f172a;
+    --sidebar-hover: #1e293b;
+    --sidebar-text: #e2e8f0;
+    --sidebar-muted: #94a3b8;
+    --text: #0f172a;
+    --muted: #5b6575;
+    --border: #e2e8f0;
+    --accent: #3730a3;
+    --accent-hover: #312e81;
+    --accent-soft: #eef2ff;
+    --user-bg: #3730a3;
+    --success: #047857;
+    --success-soft: #ecfdf5;
+    --warning: #b45309;
+    --warning-soft: #fffbeb;
+    --danger: #b91c1c;
+    --danger-soft: #fef2f2;
+    --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+    --radius: 16px;
+    --radius-sm: 10px;
+    --font: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+    --focus: 2px solid var(--accent);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+}
+
+img {
+    max-width: 100%;
+}
+
+a {
+    color: var(--accent);
+}
+
+:focus-visible {
+    outline: var(--focus);
+    outline-offset: 2px;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}

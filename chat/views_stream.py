@@ -66,7 +66,7 @@ class StreamChatView(SingleObjectMixin, View):
         def generate():
             """Generator function for SSE streaming"""
             full_response = ""
-            yield sse("status", "Writing SQL…")
+            yield sse("status", "Looking at your data…")
 
             try:
                 with httpx.Client(timeout=60.0) as client:
@@ -116,7 +116,7 @@ class StreamChatView(SingleObjectMixin, View):
                 try:
                     executor.validate(sql)
                     yield sse("sql", sql)
-                    yield sse("status", "Running query…")
+                    yield sse("status", "Fetching results…")
 
                     yield f"data: {json.dumps({
                         'type': 'sql',
@@ -128,7 +128,7 @@ class StreamChatView(SingleObjectMixin, View):
                     for row in executor.stream(sql):
                         rows.append(row)
 
-                    yield sse("status", "Writing answer…")
+                    yield sse("status", "Writing your answer…")
                     prompt_generator = SQLResultPromptGenerator()
                     answer_prompt = prompt_generator.generate(
                         user_question=user_message,
@@ -261,12 +261,12 @@ class StreamChatViewGraph(SingleObjectMixin, View):
             final_state = None
             STATUS_MESSAGES = {
                 "planner": "Understanding your question…",
-                "schema": "Selecting the relevant database schema…",
-                "sql_generator": "Generating SQL query…",
-                "sql_validator": "Validating SQL query…",
-                "sql_repair": "Fixing the SQL query…",
-                "sql_executor": "Running the query…",
-                "result_formatter": "Preparing the result…",
+                "schema": "Looking at your data…",
+                "sql_generator": "Looking at your data…",
+                "sql_validator": "Checking the question is safe…",
+                "sql_repair": "Checking the question is safe…",
+                "sql_executor": "Fetching results…",
+                "result_formatter": "Writing your answer…",
             }
             try:
                 graph = build_on_premise_graph()

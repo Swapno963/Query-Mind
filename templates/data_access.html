@@ -1,0 +1,53 @@
+{% extends "app_base.html" %}
+
+{% block title %}Your data — QueryMind{% endblock %}
+
+{% block workspace %}
+<header class="page-header">
+    <div style="display:flex;align-items:center;gap:.75rem;">
+        <button class="mobile-menu-btn" type="button" data-sidebar-open aria-label="Open menu">
+            <i class="bi bi-list"></i>
+        </button>
+        <div>
+            <h1 class="page-title">Your data</h1>
+            <div class="page-meta">QueryMind only answers from the tables you allow.</div>
+        </div>
+    </div>
+    <span class="chip chip-success"><i class="bi bi-shield-check"></i> Read-only</span>
+</header>
+<div class="page-body">
+    <div class="data-layout">
+        {% if data_ready %}
+        <div class="review-card">
+            <div class="data-summary">
+                <span class="chip">{{ profile.database }}</span>
+                <span class="chip chip-muted">{{ profile.source_name }}</span>
+                <span class="chip chip-muted">Updated {{ profile.updated_label }}</span>
+            </div>
+            <p style="margin:1rem 0 0;color:var(--muted);">{{ profile.business }}</p>
+        </div>
+        <div class="table-list">
+            <h2 class="page-title" style="margin-bottom:0.6rem;">Allowed tables</h2>
+            {% for table in profile.tables %}
+            <div class="table-row {% if not table.allowed %}excluded{% endif %}">
+                <div>
+                    <strong>{{ table.name }}</strong>
+                    <div class="page-meta">{{ table.description }}</div>
+                </div>
+                <span class="chip {% if table.allowed %}chip-success{% else %}chip-muted{% endif %}">
+                    {% if table.allowed %}Allowed{% else %}Unavailable{% endif %}
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+        <p><a class="btn btn-secondary" href="{% url 'onboarding' %}">Change access</a></p>
+        {% else %}
+        <div class="empty-setup" style="margin:0;">
+            <h1>No data connected yet</h1>
+            <p>Tell QueryMind about your work and choose which tables it may use before you ask questions.</p>
+            <a class="btn btn-primary" href="{% url 'onboarding' %}">Set up your data</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -13,7 +13,7 @@ class MessageForm(forms.ModelForm):
             "content": forms.TextInput(
                 attrs={
                     "class": "form-control border-0 bg-light",
-                    "placeholder": "Message Query Mind...",
+                    "placeholder": "Ask about your data…",
                     "autocomplete": "off",
                     "required": True,
                 }
@@ -38,7 +38,7 @@ class ConversationStartForm(forms.Form):
         widget=forms.TextInput(
             attrs={
                 "class": "form-control form-control-lg border-0",
-                "placeholder": "Ask Query Mind anything...",
+                "placeholder": "Ask about your data…",
                 "autocomplete": "off",
             }
         ),
