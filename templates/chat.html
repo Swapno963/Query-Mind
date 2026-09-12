@@ -30,7 +30,9 @@
         {% else %}
             <span class="chip chip-muted">No data connected yet</span>
         {% endif %}
+        {% if profile.is_readonly_role %}
         <span class="chip chip-success"><i class="bi bi-shield-check"></i> Read-only</span>
+        {% endif %}
     </div>
 </header>
 

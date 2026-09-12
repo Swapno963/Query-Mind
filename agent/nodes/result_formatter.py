@@ -42,6 +42,17 @@ def result_formatter(state: QueryMindState) -> dict[str, Any]:
     sql = state.sql or ""
 
     rows = execution_result.get("rows", [])
+    kind = execution_result.get("kind") or ("zero_rows" if not rows else "success")
+
+    if kind == "zero_rows" or not rows:
+        return {
+            "final_answer": (
+                "No matching records in the tables you allowed."
+            ),
+            "answer_kind": "zero_rows",
+            "current_node": "result_formatter",
+            "status": "completed",
+        }
 
     # ============================================================
     # 3. Generate result prompt
@@ -99,6 +110,7 @@ def result_formatter(state: QueryMindState) -> dict[str, Any]:
 
     return {
         "final_answer": final_answer,
+        "answer_kind": "success",
         "current_node": "result_formatter",
         "status": "completed",
     }

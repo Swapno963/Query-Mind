@@ -13,7 +13,9 @@
             <div class="page-meta">QueryMind only answers from the tables you allow.</div>
         </div>
     </div>
+    {% if profile.is_readonly_role %}
     <span class="chip chip-success"><i class="bi bi-shield-check"></i> Read-only</span>
+    {% endif %}
 </header>
 <div class="page-body">
     <div class="data-layout">

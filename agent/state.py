@@ -32,8 +32,11 @@ class QueryMindState:
     required_schema: list[str] = field(default_factory=list)
     plan: dict[str, Any] = field(default_factory=dict)
 
-    schema: dict[str, Any] = field(default_factory=dict)
+    schema: dict[str, Any] | str = field(default_factory=dict)
     schema_version: int = 0
+    schema_text: str = ""
+    allowed_tables: list[str] = field(default_factory=list)
+    workspace_id: int | None = None
 
     conversation_context: str = ""
 
@@ -50,8 +53,9 @@ class QueryMindState:
     max_retries: int = 3
 
     final_answer: str | None = None
+    answer_kind: str | None = None
 
     current_node: str | None = None
     status: str = "pending"
-    is_valid: str | None = None
+    is_valid: bool | None = None
     validation_error: str | None = None

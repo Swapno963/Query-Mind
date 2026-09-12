@@ -14,11 +14,22 @@
             <div class="page-meta">QueryMind answers only after it understands your work and your data access rules.</div>
         </div>
     </div>
-    <span class="chip chip-success"><i class="bi bi-shield-check"></i> Read-only</span>
+    <span class="chip {% if profile.is_readonly_role %}chip-success{% else %}chip-muted{% endif %}">
+        {% if profile.is_readonly_role %}
+            <i class="bi bi-shield-check"></i> Read-only
+        {% else %}
+            Connected
+        {% endif %}
+    </span>
 </header>
 <div class="page-body">
     <form class="wizard" id="onboarding-form" method="post" action="{% url 'onboarding' %}">
         {% csrf_token %}
+        {% if messages %}
+        {% for message in messages %}
+        <p class="alert alert-warning">{{ message }}</p>
+        {% endfor %}
+        {% endif %}
         <div class="progress" aria-hidden="true"><span id="wizard-progress"></span></div>
         <p class="page-meta" id="wizard-step-label">Step 1 of 6</p>
 
@@ -54,30 +65,40 @@
         </section>
 
         <section class="wizard-step" data-step="3" hidden>
-            <h2>Which database do you use?</h2>
-            <p class="lead">Pick the system that holds your data. You do not need a connection string yet.</p>
+            <h2>Connect PostgreSQL</h2>
+            <p class="lead">Closed beta supports PostgreSQL only. Use a dedicated read-only role, not a superuser or database owner.</p>
             <div class="db-options" id="db-options">
                 <label class="db-option selected"><input type="radio" name="database" value="PostgreSQL" checked> PostgreSQL</label>
-                <label class="db-option"><input type="radio" name="database" value="MySQL"> MySQL</label>
-                <label class="db-option"><input type="radio" name="database" value="Microsoft SQL Server"> Microsoft SQL Server</label>
-                <label class="db-option"><input type="radio" name="database" value="Oracle Database"> Oracle Database</label>
-                <label class="db-option"><input type="radio" name="database" value="MongoDB"> MongoDB</label>
             </div>
         </section>
 
         <section class="wizard-step" data-step="4" hidden>
             <h2>Discover your database structure</h2>
-            <p class="lead">Run the instruction for your database, then paste the output. You do not need to understand catalogs or metadata APIs.</p>
+            <p class="lead">QueryMind will test the connection and read live table names. It will not continue on a failed connection.</p>
             <div class="discover-box">
-                <div class="instruction-row">
-                    <code id="discover-instruction">SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';</code>
-                    <button class="btn btn-secondary" type="button" id="copy-instruction">Copy</button>
+                <div class="field">
+                    <label for="db_host">Host</label>
+                    <input id="db_host" name="db_host" value="{{ profile.host|default:'127.0.0.1' }}" required>
                 </div>
                 <div class="field">
-                    <label for="schema_paste">Paste the output here</label>
-                    <textarea id="schema_paste" name="schema_paste" placeholder="Paste table names or discovery output…"></textarea>
+                    <label for="db_port">Port</label>
+                    <input id="db_port" name="db_port" value="5432" required>
                 </div>
-                <p class="alert alert-success" id="discover-success" hidden>We found tables in what you pasted.</p>
+                <div class="field">
+                    <label for="db_name">Database name</label>
+                    <input id="db_name" name="db_name" value="{{ profile.db_name|default:'' }}" required>
+                </div>
+                <div class="field">
+                    <label for="db_user">Username</label>
+                    <input id="db_user" name="db_user" value="{{ profile.db_user|default:'' }}" required>
+                </div>
+                <div class="field">
+                    <label for="db_password">Password</label>
+                    <input id="db_password" name="db_password" type="password" autocomplete="new-password" required>
+                </div>
+                <button class="btn btn-secondary" type="button" id="test-connection">Test connection and discover tables</button>
+                <p class="alert alert-warning" id="discover-error" hidden></p>
+                <p class="alert alert-success" id="discover-success" hidden>Connected. Live tables are ready for the next step.</p>
             </div>
         </section>
 

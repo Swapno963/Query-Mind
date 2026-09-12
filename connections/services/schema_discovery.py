@@ -6,20 +6,23 @@ class PostgreSQLSchemaDiscovery:
     def __init__(self, alias="client"):
         self.alias = alias
 
+    def discover_with_cursor(self, cursor):
+        return {
+            "tables": self.get_tables(cursor),
+            "columns": self.get_columns(cursor),
+            "primary_keys": self.get_primary_keys(cursor),
+            "foreign_keys": self.get_foreign_keys(cursor),
+            "unique_constraints": self.get_unique_constraints(cursor),
+            "indexes": self.get_indexes(cursor),
+        }
+
     def discover(self):
         connection = connections[self.alias]
 
         connection.ensure_connection()
 
         with connection.cursor() as cursor:
-            return {
-                "tables": self.get_tables(cursor),
-                "columns": self.get_columns(cursor),
-                "primary_keys": self.get_primary_keys(cursor),
-                "foreign_keys": self.get_foreign_keys(cursor),
-                "unique_constraints": self.get_unique_constraints(cursor),
-                "indexes": self.get_indexes(cursor),
-            }
+            return self.discover_with_cursor(cursor)
 
     def get_tables(self, cursor):
         cursor.execute(
@@ -470,3 +473,62 @@ def transform_schema_for_llm(
         output.append(f"- {rule}")
 
     return "\n".join(output)
+
+
+def filter_schema_to_tables(schema_text: str, allowed_tables: list[str] | set[str]) -> str:
+    """Keep only allow-listed tables (and their relationships) in LLM schema text."""
+    import re
+
+    allowed = {str(name).lower() for name in (allowed_tables or []) if name}
+    if not schema_text or not allowed:
+        return ""
+
+    result = ["DATABASE: PostgreSQL", ""]
+    table_pattern = re.compile(
+        r"(TABLE:\s+(\w+).*?)(?=\n\nTABLE:|\n\nRELATIONSHIPS:|\n\nBUSINESS DEFINITIONS:|\n\nRULES:|$)",
+        re.DOTALL,
+    )
+    kept_tables: set[str] = set()
+    for table_block, table_name in table_pattern.findall(schema_text):
+        if table_name.lower() not in allowed:
+            continue
+        kept_tables.add(table_name.lower())
+        result.append(table_block.strip())
+        result.append("")
+
+    relationships_match = re.search(
+        r"RELATIONSHIPS:\s*(.*?)(?=\n\nBUSINESS DEFINITIONS:|\n\nRULES:|$)",
+        schema_text,
+        re.DOTALL,
+    )
+    if relationships_match:
+        relationships = []
+        for line in relationships_match.group(1).splitlines():
+            line = line.strip()
+            if not line.startswith("-"):
+                continue
+            match = re.match(
+                r"-\s+(\w+)\.(\w+)\s+→\s+(\w+)\.(\w+)",
+                line,
+            )
+            if not match:
+                continue
+            if match.group(1).lower() in kept_tables and match.group(3).lower() in kept_tables:
+                relationships.append(line)
+        if relationships:
+            result.append("RELATIONSHIPS:")
+            result.extend(relationships)
+            result.append("")
+
+    result.extend(
+        [
+            "RULES:",
+            "",
+            "- Only use tables and columns listed above.",
+            "- Never invent columns or tables.",
+            "- Use foreign-key relationships for JOINs.",
+            "- Return PostgreSQL SQL only.",
+            "- Treat tables that are not listed as if they do not exist.",
+        ]
+    )
+    return "\n".join(result).strip()

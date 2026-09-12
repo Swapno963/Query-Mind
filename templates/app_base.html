@@ -54,6 +54,10 @@
                 {{ account_name|default:"Signed in" }}
                 <span>Answers use only tables you allow</span>
             </div>
+            <form method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button class="btn btn-secondary" type="submit" style="width:100%;margin-top:.5rem;">Log out</button>
+            </form>
             {% else %}
             <a class="account-link" href="{% url 'login' %}">
                 Log in

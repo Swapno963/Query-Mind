@@ -488,9 +488,10 @@ class SelectedSchema:
     @staticmethod
     def build_relevant_schema(
         selected_schema: dict,
+        full_schema: str | None = None,
     ) -> str:
 
-        full_schema = local_schema
+        full_schema = full_schema or ""
         selected_tables = selected_schema.get("tables", {})
 
         if not selected_tables:
@@ -630,12 +631,9 @@ class PromptGenerator:
     def generate_schema_selection_prompt(
         self,
         question: str,
-        # schema: any,
+        schema: str = "",
         conversation_context: str = "",
     ) -> str:
-        # schema = self._get_schema()
-        schema = local_schema
-
         return self._build_schema_selector_prompt(
             question=question,
             conversation_context=conversation_context,
@@ -685,9 +683,7 @@ class PromptGenerator:
         return schema_data
 
     def _format_business_definitions(self) -> str:
-        return "\n".join(
-            f"- {definition}" for definition in semantic_config["business_definitions"]
-        )
+        return "- Use only the tables and columns in the provided schema."
 
     def _build_schema_selector_prompt(
         self,
@@ -842,6 +838,4 @@ class PromptGenerator:
     """.strip()
 
     def _format_business_definitions(self) -> str:
-        return "\n".join(
-            f"- {definition}" for definition in semantic_config["business_definitions"]
-        )
+        return "- Use only the tables and columns in the provided schema."

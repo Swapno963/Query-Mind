@@ -1,8 +1,3 @@
-# Defines the state graph
-# Contain business logic
-
-# agent/graph.py
-
 from langgraph.graph import END, START, StateGraph
 
 from .state import QueryMindState
@@ -15,95 +10,50 @@ from .nodes.sql_executor import sql_executor
 from .nodes.error_analyzer import error_analyzer
 from .nodes.sql_repair import sql_repair
 from .nodes.result_formatter import result_formatter
-
-# from .edges.routing import (
-#     route_after_validation,
-#     route_after_execution,
-#     route_after_error_analysis,
-# )
+from .nodes.refuse import refuse_answer
 
 
 def route_after_api_validation(state: QueryMindState) -> str:
-    """
-    Decide what happens after SQL validation in API mode.
-
-    Returns:
-        "validated" → SQL is valid, return it to the API client
-        "repair"    → SQL is invalid, send it to the repair node
-    """
-    print("========== SQL VALIDATION ROUTE ==========")
-    print("is_valid:", state.is_valid)
-    print("sql:", state.sql)
-    print("validation_error:", state.validation_error)
-    print("==========================================")
-
-    # if state.is_valid:
-    #     return "validated"
-
-    # return "repair"
-    return "validated"
+    result = state.validation_result or {}
+    if result.get("valid"):
+        return "validated"
+    if result.get("fail_closed"):
+        return "validated"
+    if (state.sql_attempts or 0) >= (state.max_retries or 3):
+        return "validated"
+    return "repair"
 
 
 def route_after_on_premise_validation(state: QueryMindState) -> str:
-    """
-    Decide what happens after SQL validation in API mode.
-
-    Returns:
-        "validated" → SQL is valid, return it to the API client
-        "repair"    → SQL is invalid, send it to the repair node
-    """
-    print("========== SQL VALIDATION ROUTE ==========")
-    print("is_valid:", state.is_valid)
-    print("sql:", state.sql)
-    print("validation_error:", state.validation_error)
-    print("==========================================")
-
-    # if state.is_valid:
-    #     return "validated"
-
-    # return "repair"
-    return "execute"
+    result = state.validation_result or {}
+    if result.get("valid"):
+        return "execute"
+    if result.get("fail_closed"):
+        return "refuse"
+    if (state.sql_attempts or 0) >= (state.max_retries or 3):
+        return "refuse"
+    return "repair"
 
 
 def route_after_on_premise_execution(state: QueryMindState) -> str:
-    """
-    Decide what happens after SQL validation in API mode.
-
-    Returns:
-        "validated" → SQL is valid, return it to the API client
-        "repair"    → SQL is invalid, send it to the repair node
-    """
-    print("========== SQL VALIDATION ROUTE ==========")
-    print("is_valid:", state.is_valid)
-    print("sql:", state.sql)
-    print("validation_error:", state.validation_error)
-    print("==========================================")
-
-    # if state.is_valid:
-    #     return "validated"
-
-    # return "repair"
-    return "success"
+    execution = state.execution_result or {}
+    if execution.get("success"):
+        return "success"
+    kind = execution.get("kind") or state.answer_kind
+    if kind in {"unavailable", "connection_failed"}:
+        return "refuse"
+    return "error"
 
 
 def route_after_on_premise_error_analysis(state: QueryMindState) -> str:
-    """
-    Decide what happens after SQL validation in API mode.
-
-    Returns:
-        "validated" → SQL is valid, return it to the API client
-        "repair"    → SQL is invalid, send it to the repair node
-    """
-    print("========== SQL VALIDATION ROUTE ==========")
-    print("is_valid:", state.is_valid)
-    print("sql:", state.sql)
-    print("validation_error:", state.validation_error)
-    print("==========================================")
-
-    # if state.is_valid:
-    #     return "validated"
-
-    # return "repair"
+    analysis = state.error_analysis or {}
+    action = analysis.get("action") or "end"
+    if (state.retry_count or 0) >= (state.max_retries or 3):
+        return "end"
+    if action == "repair":
+        return "repair"
+    if action == "schema":
+        return "schema"
     return "end"
 
 
@@ -118,9 +68,9 @@ def build_on_premise_graph():
     workflow.add_node("error_analyzer", error_analyzer)
     workflow.add_node("sql_repair", sql_repair)
     workflow.add_node("result_formatter", result_formatter)
+    workflow.add_node("refuse", refuse_answer)
 
     workflow.add_edge(START, "planner")
-
     workflow.add_edge("planner", "schema")
     workflow.add_edge("schema", "sql_generator")
     workflow.add_edge("sql_generator", "sql_validator")
@@ -131,6 +81,7 @@ def build_on_premise_graph():
         {
             "execute": "sql_executor",
             "repair": "sql_repair",
+            "refuse": "refuse",
         },
     )
 
@@ -142,6 +93,7 @@ def build_on_premise_graph():
         {
             "success": "result_formatter",
             "error": "error_analyzer",
+            "refuse": "refuse",
         },
     )
 
@@ -151,11 +103,12 @@ def build_on_premise_graph():
         {
             "repair": "sql_repair",
             "schema": "schema",
-            "end": END,
+            "end": "refuse",
         },
     )
 
     workflow.add_edge("result_formatter", END)
+    workflow.add_edge("refuse", END)
 
     return workflow.compile()
 
@@ -170,7 +123,6 @@ def build_api_query_graph():
     workflow.add_node("sql_repair", sql_repair)
 
     workflow.add_edge(START, "planner")
-
     workflow.add_edge("planner", "schema")
     workflow.add_edge("schema", "sql_generator")
     workflow.add_edge("sql_generator", "sql_validator")

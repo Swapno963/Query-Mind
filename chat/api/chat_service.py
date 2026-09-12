@@ -39,11 +39,21 @@ class ChatService:
         # 2. Generate SQL prompt
         # -----------------------------------------
 
+        workspace = getattr(conversation.user, "workspace_connection", None)
+        schema = ""
+        if workspace:
+            from connections.services.schema_discovery import filter_schema_to_tables
+
+            schema = filter_schema_to_tables(
+                workspace.schema_text or "",
+                workspace.allowed_tables or [],
+            )
+
         prompt_generator = PromptGenerator()
 
         prompt = prompt_generator.generate(
             question=user_message.content,
-            schema="",
+            schema=schema,
             conversation_context=conversation_context,
         )
 
@@ -423,20 +433,17 @@ class SQLFallbackInterceptor:
                 return True, "Out-of-scope question (sentinel expression detected)."
 
         # 2. Verify that query references valid tables (or catches missing FROM clauses)
-        # extracted_tables = set(
-        #     re.findall(r"(?:FROM|JOIN)\s+`?([a-zA-Z0-9_]+)`?", clean_sql, re.IGNORECASE)
-        # )
-
-        # # If there are no tables (e.g. SELECT NULL;) or hallucinated tables, flag it
-        # if not extracted_tables:
-        #     return True, "Query does not target any schema tables."
-
-        # hallucinated_tables = extracted_tables - allowed_tables
-        # if hallucinated_tables:
-        #     return (
-        #         True,
-        #         f"Referenced non-existent tables: {', '.join(hallucinated_tables)}",
-        #     )
+        extracted_tables = set(
+            re.findall(r"(?:FROM|JOIN)\s+`?([a-zA-Z0-9_]+)`?", clean_sql, re.IGNORECASE)
+        )
+        extracted_tables = {name.lower() for name in extracted_tables}
+        allowed = {str(name).lower() for name in (allowed_tables or set())}
+        hallucinated_tables = extracted_tables - allowed
+        if extracted_tables and hallucinated_tables:
+            return (
+                True,
+                f"Referenced tables that are not allowed: {', '.join(sorted(hallucinated_tables))}",
+            )
 
         return False, "Query is valid."
 
@@ -472,37 +479,55 @@ ALLOWED_TENANT_TABLES = {
 
 
 def build_chat_response(conversation, user_message, result, created):
-    print("Inside build_chat_respons ", conversation, user_message, result, created)
     raw_sql = result.get("sql", "")
+    workspace = getattr(conversation.user, "workspace_connection", None)
+    allowed = set(workspace.allowed_tables or []) if workspace else set()
+    if not allowed:
+        return Response(
+            {
+                "user_id": conversation.user_id,
+                "user_message_id": user_message.id,
+                "sql": None,
+                "is_executable": False,
+                "conversation_created": created,
+                "error": {
+                    "code": "NO_ALLOW_LIST",
+                    "details": "Choose allowed tables before asking.",
+                },
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
-    # Analyze generated SQL against tenant schema boundaries
     is_fallback, fallback_reason = SQLFallbackInterceptor.analyze_query(
-        sql=raw_sql, allowed_tables=ALLOWED_TENANT_TABLES
+        sql=raw_sql, allowed_tables=allowed
     )
+    if not is_fallback:
+        try:
+            from connections.services.sql_validation import ReadOnlySQLExecutor
+
+            ReadOnlySQLExecutor(allowed_tables=allowed).validate(raw_sql)
+        except Exception as exc:
+            is_fallback, fallback_reason = True, str(exc)
 
     if is_fallback:
         return Response(
             {
                 "user_id": conversation.user_id,
-                "tenant_id": conversation.tenant_id,
                 "user_message_id": user_message.id,
                 "sql": None,
                 "is_executable": False,
                 "conversation_created": created,
                 "error": {
                     "code": "OUT_OF_SCHEMA_SCOPE",
-                    # "message": "The requested information (e.g., subscriptions) is not available in the store database schema.",
                     "details": fallback_reason,
                 },
             },
             status=status.HTTP_200_OK,
         )
 
-    # Valid, executable SQL query response
     return Response(
         {
             "user_id": conversation.user_id,
-            "tenant_id": conversation.tenant_id,
             "user_message_id": user_message.id,
             "sql": raw_sql,
             "is_executable": True,

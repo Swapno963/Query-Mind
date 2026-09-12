@@ -1,26 +1,30 @@
-# Executes validated SQL
-# Generate or repair SQL
-
-
-# agent/nodes/sql_executor.py
-
 from typing import Any
 
+from connections.models import WorkspaceConnection
+from connections.services.workspace import register_workspace_database
 from connections.services.sql_validation import ReadOnlySQLExecutor
 
 from ..state import QueryMindState
 
 
 def sql_executor(state: QueryMindState) -> dict[str, Any]:
-    """
-    Execute validated SQL against the client database.
-    """
-
     sql = (state.sql or "").strip()
+    allowed = list(state.allowed_tables or [])
 
-    # ============================================================
-    # 1. Make sure SQL exists
-    # ============================================================
+    if not allowed:
+        return {
+            "execution_result": {
+                "success": False,
+                "rows": [],
+                "columns": [],
+                "row_count": 0,
+                "kind": "unavailable",
+            },
+            "database_error": "No allowed tables. QueryMind will not run this query.",
+            "answer_kind": "unavailable",
+            "current_node": "sql_executor",
+            "status": "failed",
+        }
 
     if not sql:
         return {
@@ -29,88 +33,97 @@ def sql_executor(state: QueryMindState) -> dict[str, Any]:
                 "rows": [],
                 "columns": [],
                 "row_count": 0,
+                "kind": "error",
             },
             "database_error": "No SQL query available for execution.",
             "current_node": "sql_executor",
             "status": "running",
         }
 
-    # ============================================================
-    # 3. Create read-only SQL executor
-    # ============================================================
-
-    executor = ReadOnlySQLExecutor(
-        database="client",
-    )
-
-    try:
-        # ========================================================
-        # 4. Validate SQL using the actual database executor
-        # ========================================================
-
-        executor.validate(sql)
-
-        # ========================================================
-        # 5. Execute SQL
-        # ========================================================
-
-        rows: list[dict[str, Any]] = []
-
-        print("Executing SQL:")
-        print(sql)
-
-        for row in executor.stream(sql):
-            rows.append(row)
-
-        # ========================================================
-        # 6. Extract columns
-        # ========================================================
-
-        columns = []
-
-        if rows:
-            columns = list(rows[0].keys())
-
-        # ========================================================
-        # 7. Build execution result
-        # ========================================================
-        execution_result = {
-            "success": True,
-            "rows": rows,
-            "columns": columns,
-            "row_count": len(rows),
-        }
-        print("execution_result : ", execution_result)
-
-        # ========================================================
-        # 8. Update state
-        # ========================================================
-
-        return {
-            "execution_result": execution_result,
-            "database_error": None,
-            "current_node": "sql_executor",
-            "status": "running",
-        }
-
-    except Exception as exc:
-
-        # ========================================================
-        # 9. Database execution failed
-        # ========================================================
-
-        print("SQL execution failed:")
-        print(f"Error type: {type(exc).__name__}")
-        print(f"Error message: {exc}")
-
+    workspace = None
+    if state.workspace_id:
+        workspace = WorkspaceConnection.objects.filter(pk=state.workspace_id).first()
+    if workspace is None:
         return {
             "execution_result": {
                 "success": False,
                 "rows": [],
                 "columns": [],
                 "row_count": 0,
+                "kind": "connection_failed",
             },
-            "database_error": str(exc),
+            "database_error": "No database connection is configured for this workspace.",
+            "answer_kind": "connection_failed",
+            "current_node": "sql_executor",
+            "status": "failed",
+        }
+
+    alias = register_workspace_database(workspace)
+    executor = ReadOnlySQLExecutor(
+        database=alias,
+        allowed_tables=set(allowed),
+    )
+
+    try:
+        executor.validate(sql)
+        rows: list[dict[str, Any]] = []
+        for row in executor.stream(sql):
+            rows.append(row)
+        columns = list(rows[0].keys()) if rows else []
+        return {
+            "execution_result": {
+                "success": True,
+                "rows": rows,
+                "columns": columns,
+                "row_count": len(rows),
+                "kind": "zero_rows" if not rows else "success",
+            },
+            "database_error": None,
+            "answer_kind": "zero_rows" if not rows else "success",
             "current_node": "sql_executor",
             "status": "running",
         }
+    except PermissionError as exc:
+        return {
+            "execution_result": {
+                "success": False,
+                "rows": [],
+                "columns": [],
+                "row_count": 0,
+                "kind": "unavailable",
+            },
+            "database_error": str(exc),
+            "answer_kind": "unavailable",
+            "current_node": "sql_executor",
+            "status": "failed",
+        }
+    except Exception as exc:
+        message = str(exc)
+        kind = "connection_failed" if _is_connection_error(message) else "error"
+        return {
+            "execution_result": {
+                "success": False,
+                "rows": [],
+                "columns": [],
+                "row_count": 0,
+                "kind": kind,
+            },
+            "database_error": message,
+            "answer_kind": kind,
+            "current_node": "sql_executor",
+            "status": "running",
+        }
+
+
+def _is_connection_error(message: str) -> bool:
+    lower = message.lower()
+    return any(
+        token in lower
+        for token in (
+            "connection refused",
+            "could not connect",
+            "connection timed out",
+            "server closed the connection",
+            "connection reset",
+        )
+    )

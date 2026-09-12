@@ -69,25 +69,34 @@ class ReadOnlySQLExecutor:
                 f"Only SELECT queries are allowed. " f"Received: {expression.key}"
             )
 
-        # self._validate_tables(expression)
+        self._validate_tables(expression)
 
         return expression
 
     def _validate_tables(self, expression: exp.Expression) -> None:
-        """
-        Optional table-level authorization.
-        """
+        """Reject SQL that touches anything outside the user's allow-list."""
 
-        if self.allowed_tables is None:
-            return
+        if not self.allowed_tables:
+            raise PermissionError(
+                "No allowed tables. QueryMind will not run this query."
+            )
 
-        tables = {table.name for table in expression.find_all(exp.Table)}
+        allowed = {str(name).lower() for name in self.allowed_tables}
+        cte_names = {
+            str(cte.alias_or_name).lower() for cte in expression.find_all(exp.CTE)
+        }
+        tables = {
+            str(table.name).lower()
+            for table in expression.find_all(exp.Table)
+            if table.name
+        }
+        tables -= cte_names
 
-        unauthorized = tables - self.allowed_tables
+        unauthorized = tables - allowed
 
         if unauthorized:
             raise PermissionError(
-                f"Access to these tables is not allowed: "
+                "Access to these tables is not allowed: "
                 f"{', '.join(sorted(unauthorized))}"
             )
 

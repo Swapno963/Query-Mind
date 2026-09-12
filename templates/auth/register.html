@@ -25,6 +25,11 @@
         </div>
         <h1>Create your workspace</h1>
         <p class="lead">Your database stays yours. QueryMind asks questions against what you allow.</p>
+        {% if messages %}
+        {% for message in messages %}
+        <p class="alert alert-warning">{{ message }}</p>
+        {% endfor %}
+        {% endif %}
         <form method="post" action="{% url 'register' %}">
             {% csrf_token %}
             <div class="field">

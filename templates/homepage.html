@@ -16,7 +16,9 @@
     <div class="header-chips">
         {% if data_ready %}
             <span class="chip">{{ profile.source_name }}</span>
+            {% if profile.is_readonly_role %}
             <span class="chip chip-success"><i class="bi bi-shield-check"></i> Read-only</span>
+            {% endif %}
         {% else %}
             <span class="chip chip-muted">No data connected yet</span>
         {% endif %}

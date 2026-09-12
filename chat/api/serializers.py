@@ -9,36 +9,10 @@ class ChatRequestSerializer(serializers.Serializer):
     )
 
 
-from rest_framework import serializers
-
-
-class ChatRequestSerializer(serializers.Serializer):
-    user_id = serializers.IntegerField(
-        required=True,
-    )
-
-    tenant_id = serializers.IntegerField(
-        required=True,
-    )
-
-    message = serializers.CharField(
-        required=True,
-    )
-
-
 class ChatRequestResultSerializer(serializers.Serializer):
-    user_id = serializers.IntegerField(
-        required=True,
-    )
-
-    tenant_id = serializers.IntegerField(
-        required=True,
-    )
-
     user_message_id = serializers.IntegerField(
         required=True,
     )
-
     result = serializers.ListField(
         child=serializers.DictField(),
         required=True,

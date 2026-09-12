@@ -137,6 +137,25 @@ def sql_generator_on_premise(state: QueryMindState) -> dict[str, Any]:
             "status": "failed",
         }
 
+    if state.answer_kind in {"unavailable", "connection_failed"}:
+        return {
+            "sql": None,
+            "database_error": state.database_error
+            or "QueryMind will not run this query.",
+            "current_node": "sql_generator",
+            "status": "failed",
+        }
+
+    schema_blob = state.schema or state.schema_text
+    if not schema_blob:
+        return {
+            "sql": None,
+            "database_error": "No allowed tables. QueryMind will not run this query.",
+            "answer_kind": "unavailable",
+            "current_node": "sql_generator",
+            "status": "failed",
+        }
+
     try:
         # ========================================================
         # 1. Generate prompt
@@ -146,7 +165,7 @@ def sql_generator_on_premise(state: QueryMindState) -> dict[str, Any]:
 
         prompt = prompt_generator.generate(
             question=question,
-            schema=state.schema,
+            schema=schema_blob,
             conversation_context=state.conversation_context,
         )
 

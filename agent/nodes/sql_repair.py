@@ -76,6 +76,9 @@ def sql_repair(state: QueryMindState) -> dict[str, Any]:
         }
 
     if not database_error:
+        database_error = (state.validation_error or "").strip()
+
+    if not database_error:
         return {
             "error_analysis": {
                 **error_analysis,
@@ -102,7 +105,7 @@ def sql_repair(state: QueryMindState) -> dict[str, Any]:
     # ============================================================
 
     try:
-        repaired_sql = ChatService.ask_ai(prompt)
+        repaired_sql = ChatService.ask_on_premise_ai(prompt)
 
     except Exception as exc:
 
@@ -139,6 +142,7 @@ def sql_repair(state: QueryMindState) -> dict[str, Any]:
     return {
         "sql": repaired_sql,
         "sql_attempts": state.sql_attempts + 1,
+        "retry_count": state.retry_count + 1,
         # Clear the previous execution error because we are
         # going to validate/execute a new SQL attempt.
         "database_error": None,

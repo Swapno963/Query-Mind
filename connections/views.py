@@ -1,72 +1,34 @@
-from connections.services.schema_discovery import PostgreSQLSchemaDiscovery
-from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework import status
-from connections.services.schema_discovery import transform_schema_for_llm
 
-semantic_config = {
-    "tables": {
-        "users": {
-            "description": "Application users.",
-        },
-        "orders": {
-            "description": "Customer purchase orders.",
-            "columns": {
-                "status": {
-                    "values": [
-                        "PENDING",
-                        "CONFIRMED",
-                        "SHIPPED",
-                        "DELIVERED",
-                        "CANCELLED",
-                    ]
-                },
-                "payment_status": {
-                    "values": [
-                        "UNPAID",
-                        "PAID",
-                        "REFUNDED",
-                    ]
-                },
-            },
-        },
-        "order_items": {
-            "description": "Products contained in an order.",
-        },
-        "products": {
-            "description": "Products available for sale.",
-        },
-    },
-    "business_definitions": [
-        "\"unpaid\" means orders.payment_status = 'UNPAID'",
-        "\"paid\" means orders.payment_status = 'PAID'",
-        '"revenue" means SUM(orders.total_amount) for paid orders',
-    ],
-    "rules": [
-        "Only use tables and columns listed above.",
-        "Never invent columns.",
-        "Use foreign-key relationships for JOINs.",
-        "Return PostgreSQL SQL only.",
-    ],
-}
+from chat.ui import workspace_for
+from connections.services.schema_discovery import filter_schema_to_tables
 
 
 class QueryView(APIView):
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        discovery = PostgreSQLSchemaDiscovery()
-
-        schema = discovery.discover()
-        llm_schema = transform_schema_for_llm(
-            schema,
-            semantic_config,
+        workspace = workspace_for(request.user)
+        if not workspace or not workspace.allowed_tables:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Connect PostgreSQL and choose allowed tables first.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        schema = filter_schema_to_tables(
+            workspace.schema_text or "",
+            workspace.allowed_tables,
         )
-
-        # print(llm_schema)
         return Response(
             {
                 "success": True,
-                "llm_schema": llm_schema,
+                "llm_schema": schema,
+                "allowed_tables": workspace.allowed_tables,
             },
             status=status.HTTP_200_OK,
         )

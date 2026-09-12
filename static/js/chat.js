@@ -160,7 +160,23 @@
                 }
                 if (errorDiv) {
                     errorDiv.hidden = false;
-                    errorDiv.innerHTML = errorCardHtml(title, detail);
+                    const code = data.code || "";
+                    if (code === "unavailable" || /not allowed|permission|unavailable/i.test(message)) {
+                        title = "That data is not available";
+                        detail = "QueryMind can only use tables you allowed. Change access from Your data if this should be included.";
+                    } else if (code === "connection_failed" || /connection lost|connect/i.test(message)) {
+                        title = "Connection lost";
+                        detail = "QueryMind could not reach your database. Check the connection from Your data.";
+                    } else if (code === "zero_rows") {
+                        title = "No matching records";
+                        detail = "The tables you allowed contain no matching rows for this question.";
+                    }
+                    let html = errorCardHtml(title, detail);
+                    if (data.detail) {
+                        html += "<details class=\"how-answered\"><summary>Technical detail</summary><pre>" +
+                            String(data.detail).replace(/[<>]/g, "") + "</pre></details>";
+                    }
+                    errorDiv.innerHTML = html;
                 } else {
                     contentDiv.innerHTML = errorCardHtml(title, detail);
                 }

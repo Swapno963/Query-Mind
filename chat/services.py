@@ -152,15 +152,24 @@ class ConversationService:
     @transaction.atomic
     def get_or_create_conversation(
         *,
-        user_id,
-        tenant_id,
+        user,
+        tenant_id=None,
+        title="New Chat",
     ):
-        conversation, created = Conversation.objects.get_or_create(
-            user_id=user_id,
-            tenant_id=tenant_id,
-            defaults={
-                "title": "New Chat",
-            },
+        conversation = (
+            Conversation.objects.filter(user=user)
+            .order_by("-updated_at")
+            .first()
         )
+        if conversation:
+            return conversation, False
+        conversation = Conversation.objects.create(
+            user=user,
+            tenant_id=tenant_id,
+            title=title,
+        )
+        return conversation, True
 
-        return conversation, created
+    @staticmethod
+    def create_conversation_for_user(user, initial_message):
+        return Conversation.objects.create_with_message(initial_message, user=user)
