@@ -1,6 +1,6 @@
 from django.contrib import admin
-from django.db.models import Count  # Import Count from models, not admin
-from .models import Conversation, Message
+from django.db.models import Count
+from .models import ApiAccessRequest, ApiKey, Conversation, Message
 
 
 @admin.register(Conversation)
@@ -53,3 +53,20 @@ class MessageAdmin(admin.ModelAdmin):
         (None, {"fields": ("conversation", "is_user", "content")}),
         ("Timestamps", {"fields": ("timestamp",), "classes": ("collapse",)}),
     )
+
+
+@admin.register(ApiAccessRequest)
+class ApiAccessRequestAdmin(admin.ModelAdmin):
+    list_display = ("user", "status", "created_at", "updated_at")
+    list_filter = ("status",)
+    search_fields = ("user__username", "user__email", "note")
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(ApiKey)
+class ApiKeyAdmin(admin.ModelAdmin):
+    list_display = ("prefix", "user", "revoked_at", "created_at")
+    list_filter = ("revoked_at",)
+    search_fields = ("prefix", "user__username", "user__email")
+    readonly_fields = ("prefix", "key_hash", "created_at")
+

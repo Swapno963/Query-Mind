@@ -35,12 +35,17 @@ class ReadOnlySQLExecutor:
         self,
         database: str = "client",
         allowed_tables: set[str] | None = None,
+        allowed_columns: dict[str, set[str] | list[str]] | None = None,
         statement_timeout_ms: int = 10_000,
         max_rows: int = 10_000,
         fetch_size: int = 500,
     ):
         self.database = database
         self.allowed_tables = allowed_tables
+        self.allowed_columns = {
+            str(table).lower(): {str(col).lower() for col in (cols or [])}
+            for table, cols in (allowed_columns or {}).items()
+        }
         self.statement_timeout_ms = statement_timeout_ms
         self.max_rows = max_rows
         self.fetch_size = fetch_size
@@ -70,6 +75,7 @@ class ReadOnlySQLExecutor:
             )
 
         self._validate_tables(expression)
+        self._validate_columns(expression)
 
         return expression
 
@@ -99,6 +105,44 @@ class ReadOnlySQLExecutor:
                 "Access to these tables is not allowed: "
                 f"{', '.join(sorted(unauthorized))}"
             )
+
+    def _validate_columns(self, expression: exp.Expression) -> None:
+        if expression.find(exp.Star):
+            for star in expression.find_all(exp.Star):
+                parent = star.parent
+                if isinstance(parent, (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max)):
+                    continue
+                raise PermissionError(
+                    "SELECT * is not allowed. Name only the columns QueryMind may use."
+                )
+        if not self.allowed_columns:
+            raise PermissionError(
+                "No allowed columns. QueryMind will not run this query."
+            )
+
+        for column in expression.find_all(exp.Column):
+            name = str(column.name or "").lower()
+            if not name or name == "*":
+                raise PermissionError(
+                    "SELECT * is not allowed. Name only the columns QueryMind may use."
+                )
+            table = str(column.table or "").lower()
+            if table:
+                allowed = self.allowed_columns.get(table)
+                if allowed is None or name not in allowed:
+                    raise PermissionError(
+                        f"Access to {table}.{name} is not allowed."
+                    )
+                continue
+            matches = [
+                tbl
+                for tbl, cols in self.allowed_columns.items()
+                if name in cols
+            ]
+            if not matches:
+                raise PermissionError(
+                    f"Access to column {name} is not allowed."
+                )
 
     def execute(self, sql: str) -> list[dict[str, Any]]:
         """

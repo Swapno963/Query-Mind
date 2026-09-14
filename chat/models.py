@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 
 class ConversationManager(models.Manager):
@@ -11,8 +12,13 @@ class ConversationManager(models.Manager):
     def with_messages(self):
         return self.get_queryset().prefetch_related("messages")
 
-    def for_user(self, user):
-        return self.get_queryset().filter(user=user)
+    def for_user(self, user, kind=None):
+        queryset = self.get_queryset().filter(user=user)
+        if kind:
+            queryset = queryset.filter(
+                Q(workspace__kind=kind) | Q(workspace__isnull=True)
+            )
+        return queryset
 
     def create_with_message(self, message_content, user=None):
         title = (
@@ -34,6 +40,13 @@ class Conversation(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
+        related_name="conversations",
+        null=True,
+        blank=True,
+    )
+    workspace = models.ForeignKey(
+        "connections.WorkspaceConnection",
+        on_delete=models.SET_NULL,
         related_name="conversations",
         null=True,
         blank=True,
@@ -94,3 +107,56 @@ class Message(models.Model):
     @property
     def truncated_content(self):
         return self.content[:100] + "..." if len(self.content) > 100 else self.content
+
+
+class ApiAccessRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_DENIED = "denied"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_DENIED, "Denied"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="api_access_requests",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user} ({self.status})"
+
+
+class ApiKey(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="api_keys",
+    )
+    prefix = models.CharField(max_length=24, unique=True)
+    key_hash = models.CharField(max_length=64)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.prefix} ({self.user})"
+
+    @property
+    def is_active(self):
+        return self.revoked_at is None

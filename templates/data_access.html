@@ -35,6 +35,9 @@
                 <div>
                     <strong>{{ table.name }}</strong>
                     <div class="page-meta">{{ table.description }}</div>
+                    {% if table.allowed and table.columns %}
+                    <div class="page-meta">Columns: {{ table.columns|join:", " }}</div>
+                    {% endif %}
                 </div>
                 <span class="chip {% if table.allowed %}chip-success{% else %}chip-muted{% endif %}">
                     {% if table.allowed %}Allowed{% else %}Unavailable{% endif %}
@@ -46,8 +49,11 @@
         {% else %}
         <div class="empty-setup" style="margin:0;">
             <h1>No data connected yet</h1>
-            <p>Tell QueryMind about your work and choose which tables it may use before you ask questions.</p>
-            <a class="btn btn-primary" href="{% url 'onboarding' %}">Set up your data</a>
+            <p>Tell QueryMind about your work and choose which tables chat may use. The API uses a separate workspace and never needs this connection.</p>
+            <p>
+                <a class="btn btn-primary" href="{% url 'onboarding' %}">Set up chat</a>
+                <a class="btn btn-secondary" href="{% url 'developers' %}">Use the API</a>
+            </p>
         </div>
         {% endif %}
     </div>

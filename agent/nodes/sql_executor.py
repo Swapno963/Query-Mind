@@ -10,8 +10,9 @@ from ..state import QueryMindState
 def sql_executor(state: QueryMindState) -> dict[str, Any]:
     sql = (state.sql or "").strip()
     allowed = list(state.allowed_tables or [])
+    allowed_columns = dict(state.allowed_columns or {})
 
-    if not allowed:
+    if not allowed or not allowed_columns:
         return {
             "execution_result": {
                 "success": False,
@@ -20,7 +21,7 @@ def sql_executor(state: QueryMindState) -> dict[str, Any]:
                 "row_count": 0,
                 "kind": "unavailable",
             },
-            "database_error": "No allowed tables. QueryMind will not run this query.",
+            "database_error": "No allowed tables and columns. QueryMind will not run this query.",
             "answer_kind": "unavailable",
             "current_node": "sql_executor",
             "status": "failed",
@@ -62,6 +63,7 @@ def sql_executor(state: QueryMindState) -> dict[str, Any]:
     executor = ReadOnlySQLExecutor(
         database=alias,
         allowed_tables=set(allowed),
+        allowed_columns=allowed_columns,
     )
 
     try:

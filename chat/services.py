@@ -153,18 +153,19 @@ class ConversationService:
     def get_or_create_conversation(
         *,
         user,
+        workspace=None,
         tenant_id=None,
         title="New Chat",
     ):
-        conversation = (
-            Conversation.objects.filter(user=user)
-            .order_by("-updated_at")
-            .first()
-        )
+        queryset = Conversation.objects.filter(user=user)
+        if workspace is not None:
+            queryset = queryset.filter(workspace=workspace)
+        conversation = queryset.order_by("-updated_at").first()
         if conversation:
             return conversation, False
         conversation = Conversation.objects.create(
             user=user,
+            workspace=workspace,
             tenant_id=tenant_id,
             title=title,
         )

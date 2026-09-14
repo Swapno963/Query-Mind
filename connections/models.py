@@ -10,21 +10,35 @@ class DatabaseSchema(models.Model):
 
 
 class WorkspaceConnection(models.Model):
-    """One PostgreSQL connection per user workspace."""
+    """One catalog per product: chat (live Postgres) or API (posted schema)."""
 
-    user = models.OneToOneField(
+    KIND_CHAT = "chat"
+    KIND_API = "api"
+    KIND_CHOICES = [
+        (KIND_CHAT, "Chat"),
+        (KIND_API, "API"),
+    ]
+
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="workspace_connection",
+        related_name="workspaces",
     )
-    host = models.CharField(max_length=255)
+    kind = models.CharField(
+        max_length=16,
+        choices=KIND_CHOICES,
+        default=KIND_CHAT,
+    )
+    host = models.CharField(max_length=255, blank=True, default="")
     port = models.PositiveIntegerField(default=5432)
-    db_name = models.CharField(max_length=255)
-    db_user = models.CharField(max_length=255)
-    password_ciphertext = models.TextField()
+    db_name = models.CharField(max_length=255, blank=True, default="")
+    db_user = models.CharField(max_length=255, blank=True, default="")
+    password_ciphertext = models.TextField(blank=True, default="")
     schema_text = models.TextField(blank=True, default="")
     discovered_tables = models.JSONField(default=list, blank=True)
+    discovered_columns = models.JSONField(default=dict, blank=True)
     allowed_tables = models.JSONField(default=list, blank=True)
+    allowed_columns = models.JSONField(default=dict, blank=True)
     industry = models.CharField(max_length=120, blank=True, default="")
     business = models.TextField(blank=True, default="")
     keeps = models.JSONField(default=list, blank=True)
@@ -35,18 +49,21 @@ class WorkspaceConnection(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["user"],
-                name="unique_workspace_connection_per_user",
+                fields=["user", "kind"],
+                name="unique_workspace_per_user_kind",
             ),
         ]
 
     def __str__(self):
-        return f"{self.db_name}@{self.host} ({self.user})"
+        label = self.db_name or self.kind
+        return f"{label} ({self.kind}, {self.user})"
 
     def set_password(self, raw_password: str) -> None:
         self.password_ciphertext = encrypt_secret(raw_password)
 
     def get_password(self) -> str:
+        if not self.password_ciphertext:
+            return ""
         return decrypt_secret(self.password_ciphertext)
 
     @property

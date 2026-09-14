@@ -39,7 +39,7 @@ class ChatService:
         # 2. Generate SQL prompt
         # -----------------------------------------
 
-        workspace = getattr(conversation.user, "workspace_connection", None)
+        workspace = getattr(conversation, "workspace", None)
         schema = ""
         if workspace:
             from connections.services.schema_discovery import filter_schema_to_tables
@@ -47,6 +47,7 @@ class ChatService:
             schema = filter_schema_to_tables(
                 workspace.schema_text or "",
                 workspace.allowed_tables or [],
+                workspace.allowed_columns or {},
             )
 
         prompt_generator = PromptGenerator()
@@ -480,9 +481,10 @@ ALLOWED_TENANT_TABLES = {
 
 def build_chat_response(conversation, user_message, result, created):
     raw_sql = result.get("sql", "")
-    workspace = getattr(conversation.user, "workspace_connection", None)
+    workspace = getattr(conversation, "workspace", None)
     allowed = set(workspace.allowed_tables or []) if workspace else set()
-    if not allowed:
+    allowed_columns = dict(workspace.allowed_columns or {}) if workspace else {}
+    if not allowed or not allowed_columns:
         return Response(
             {
                 "user_id": conversation.user_id,
@@ -492,7 +494,7 @@ def build_chat_response(conversation, user_message, result, created):
                 "conversation_created": created,
                 "error": {
                     "code": "NO_ALLOW_LIST",
-                    "details": "Choose allowed tables before asking.",
+                    "details": "Choose allowed tables and columns before asking.",
                 },
             },
             status=status.HTTP_403_FORBIDDEN,
@@ -505,7 +507,10 @@ def build_chat_response(conversation, user_message, result, created):
         try:
             from connections.services.sql_validation import ReadOnlySQLExecutor
 
-            ReadOnlySQLExecutor(allowed_tables=allowed).validate(raw_sql)
+            ReadOnlySQLExecutor(
+                allowed_tables=allowed,
+                allowed_columns=allowed_columns,
+            ).validate(raw_sql)
         except Exception as exc:
             is_fallback, fallback_reason = True, str(exc)
 

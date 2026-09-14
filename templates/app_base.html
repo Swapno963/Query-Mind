@@ -26,6 +26,9 @@
             <a class="nav-link {% if active_nav == 'data' %}active{% endif %}" href="{% url 'data_access' %}">
                 <i class="bi bi-database"></i> Your data
             </a>
+            <a class="nav-link {% if active_nav == 'api' %}active{% endif %}" href="{% url 'developers' %}">
+                <i class="bi bi-code-slash"></i> API
+            </a>
             {% if not data_ready %}
             <a class="nav-link {% if active_nav == 'onboarding' %}active{% endif %}" href="{% url 'onboarding' %}">
                 <i class="bi bi-sliders"></i> Set up your data

@@ -8,10 +8,11 @@ from ..state import QueryMindState
 
 def sql_validator(state: QueryMindState) -> dict[str, Any]:
     allowed = {str(name).lower() for name in (state.allowed_tables or []) if name}
+    allowed_columns = dict(state.allowed_columns or {})
     sql = state.sql or ""
 
-    if not allowed:
-        error = "No allowed tables. QueryMind will not run this query."
+    if not allowed or not allowed_columns:
+        error = "No allowed tables and columns. QueryMind will not run this query."
         return _invalid(
             error,
             fail_closed=True,
@@ -34,7 +35,10 @@ def sql_validator(state: QueryMindState) -> dict[str, Any]:
         )
 
     try:
-        ReadOnlySQLExecutor(allowed_tables=allowed).validate(sql)
+        ReadOnlySQLExecutor(
+            allowed_tables=allowed,
+            allowed_columns=allowed_columns,
+        ).validate(sql)
     except PermissionError as exc:
         return _invalid(str(exc), fail_closed=True, kind="unavailable")
     except ValueError as exc:

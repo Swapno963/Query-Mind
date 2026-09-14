@@ -10,6 +10,9 @@ from .constants import (
 )
 from .models import Conversation
 
+KIND_CHAT = WorkspaceConnection.KIND_CHAT
+KIND_API = WorkspaceConnection.KIND_API
+
 DEFAULT_PROFILE = {
     "source_name": "No data connected yet",
     "database": "",
@@ -22,30 +25,81 @@ DEFAULT_PROFILE = {
 }
 
 
-def workspace_for(user):
+def workspace_for(user, kind=KIND_CHAT):
     if not user or not user.is_authenticated:
         return None
-    return WorkspaceConnection.objects.filter(user=user).first()
+    return WorkspaceConnection.objects.filter(user=user, kind=kind).first()
+
+
+def get_or_create_workspace(user, kind):
+    defaults = {
+        "host": "",
+        "port": 5432,
+        "db_name": "",
+        "db_user": "",
+        "password_ciphertext": "",
+    }
+    workspace, _created = WorkspaceConnection.objects.get_or_create(
+        user=user,
+        kind=kind,
+        defaults=defaults,
+    )
+    return workspace
+
+
+def chat_ready(workspace):
+    return bool(
+        workspace
+        and workspace.kind == KIND_CHAT
+        and workspace.host
+        and workspace.db_name
+        and workspace.allowed_tables
+        and workspace.allowed_columns
+    )
+
+
+def api_ready(workspace):
+    return bool(
+        workspace
+        and workspace.kind == KIND_API
+        and workspace.allowed_tables
+        and workspace.allowed_columns
+    )
+
+
+def workspace_ready(workspace):
+    if not workspace:
+        return False
+    if workspace.kind == KIND_API:
+        return api_ready(workspace)
+    return chat_ready(workspace)
 
 
 def profile_from_workspace(workspace):
     if not workspace:
         return DEFAULT_PROFILE
     allowed = {str(name) for name in (workspace.allowed_tables or [])}
+    allowed_columns = workspace.allowed_columns or {}
     tables = []
     for name in workspace.discovered_tables or []:
+        cols = allowed_columns.get(name) or []
         tables.append(
             {
                 "name": name,
                 "description": (
-                    "Allowed by you"
-                    if name in allowed
+                    "Allowed by you: " + ", ".join(cols)
+                    if name in allowed and cols
                     else "Unavailable to QueryMind"
                 ),
-                "allowed": name in allowed,
+                "allowed": name in allowed and bool(cols),
+                "columns": cols,
             }
         )
-    host_label = f"{workspace.db_name} on {workspace.host}"
+    host_label = (
+        f"{workspace.db_name} on {workspace.host}"
+        if workspace.host and workspace.db_name
+        else "Discovered schema"
+    )
     return {
         "source_name": host_label,
         "database": "PostgreSQL",
@@ -59,19 +113,20 @@ def profile_from_workspace(workspace):
         "db_name": workspace.db_name,
         "db_user": workspace.db_user,
         "allowed_tables": list(workspace.allowed_tables or []),
+        "allowed_columns": dict(workspace.allowed_columns or {}),
     }
 
 
 def product_context(request, extra=None):
     user = getattr(request, "user", None)
-    workspace = workspace_for(user) if user and user.is_authenticated else None
+    workspace = workspace_for(user, KIND_CHAT) if user and user.is_authenticated else None
     profile = profile_from_workspace(workspace)
     recent = (
-        Conversation.objects.for_user(user).order_by("-updated_at")[:20]
+        Conversation.objects.for_user(user, kind=KIND_CHAT).order_by("-updated_at")[:20]
         if user and user.is_authenticated
         else Conversation.objects.none()
     )
-    data_ready = bool(workspace and workspace.allowed_tables)
+    data_ready = chat_ready(workspace)
     context = {
         "recent_conversations": recent,
         "data_ready": data_ready,

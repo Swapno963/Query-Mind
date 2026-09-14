@@ -51,8 +51,11 @@
 <div class="page-body">
     <div class="empty-setup">
         <h1>Set up your data first</h1>
-        <p>QueryMind does not start with an empty chat. It needs to know your work, your database, and which tables it may use.</p>
-        <a class="btn btn-primary" href="{% url 'onboarding' %}">Set up your data</a>
+        <p>Chat needs a live PostgreSQL connection and the tables you allow. If you only want the API, QueryMind should never connect to your database.</p>
+        <p>
+            <a class="btn btn-primary" href="{% url 'onboarding' %}">Set up chat</a>
+            <a class="btn btn-secondary" href="{% url 'developers' %}">Use the API</a>
+        </p>
     </div>
 </div>
 {% endif %}

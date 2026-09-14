@@ -20,6 +20,7 @@ urlpatterns = [
         name="onboarding_discover",
     ),
     path("data/", views.DataAccessView.as_view(), name="data_access"),
+    path("developers/", views.DevelopersView.as_view(), name="developers"),
     path("chat/<int:conversation_id>/", views.ChatView.as_view(), name="chat"),
     path(
         "chat/<int:conversation_id>/stream/",

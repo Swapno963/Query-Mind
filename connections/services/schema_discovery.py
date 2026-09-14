@@ -475,13 +475,24 @@ def transform_schema_for_llm(
     return "\n".join(output)
 
 
-def filter_schema_to_tables(schema_text: str, allowed_tables: list[str] | set[str]) -> str:
-    """Keep only allow-listed tables (and their relationships) in LLM schema text."""
+def filter_schema_to_tables(
+    schema_text: str,
+    allowed_tables: list[str] | set[str],
+    allowed_columns: dict[str, list[str]] | None = None,
+) -> str:
+    """Keep only allow-listed tables and columns in LLM schema text."""
     import re
 
     allowed = {str(name).lower() for name in (allowed_tables or []) if name}
     if not schema_text or not allowed:
         return ""
+
+    columns_by_table: dict[str, set[str]] = {}
+    if allowed_columns:
+        for table, cols in allowed_columns.items():
+            columns_by_table[str(table).lower()] = {
+                str(col).lower() for col in (cols or []) if col
+            }
 
     result = ["DATABASE: PostgreSQL", ""]
     table_pattern = re.compile(
@@ -493,7 +504,19 @@ def filter_schema_to_tables(schema_text: str, allowed_tables: list[str] | set[st
         if table_name.lower() not in allowed:
             continue
         kept_tables.add(table_name.lower())
-        result.append(table_block.strip())
+        allowed_for_table = columns_by_table.get(table_name.lower())
+        if allowed_columns is not None and not allowed_for_table:
+            continue
+        if allowed_for_table:
+            filtered_lines = []
+            for line in table_block.strip().splitlines():
+                match = re.match(r"^- (\w+)\s+", line.strip())
+                if match and match.group(1).lower() not in allowed_for_table:
+                    continue
+                filtered_lines.append(line)
+            result.append("\n".join(filtered_lines).strip())
+        else:
+            result.append(table_block.strip())
         result.append("")
 
     relationships_match = re.search(
@@ -513,8 +536,21 @@ def filter_schema_to_tables(schema_text: str, allowed_tables: list[str] | set[st
             )
             if not match:
                 continue
-            if match.group(1).lower() in kept_tables and match.group(3).lower() in kept_tables:
-                relationships.append(line)
+            from_table, from_col, to_table, to_col = (
+                match.group(1).lower(),
+                match.group(2).lower(),
+                match.group(3).lower(),
+                match.group(4).lower(),
+            )
+            if from_table not in kept_tables or to_table not in kept_tables:
+                continue
+            from_allowed = columns_by_table.get(from_table)
+            to_allowed = columns_by_table.get(to_table)
+            if from_allowed and from_col not in from_allowed:
+                continue
+            if to_allowed and to_col not in to_allowed:
+                continue
+            relationships.append(line)
         if relationships:
             result.append("RELATIONSHIPS:")
             result.extend(relationships)
@@ -528,7 +564,7 @@ def filter_schema_to_tables(schema_text: str, allowed_tables: list[str] | set[st
             "- Never invent columns or tables.",
             "- Use foreign-key relationships for JOINs.",
             "- Return PostgreSQL SQL only.",
-            "- Treat tables that are not listed as if they do not exist.",
+            "- Treat tables and columns that are not listed as if they do not exist.",
         ]
     )
     return "\n".join(result).strip()

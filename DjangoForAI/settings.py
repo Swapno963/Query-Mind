@@ -82,9 +82,11 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ],
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "chat.authentication.ApiKeyAuthentication",
         "rest_framework.authentication.SessionAuthentication",
         "rest_framework.authentication.BasicAuthentication",
     ],
+    "EXCEPTION_HANDLER": "chat.api.exception_handler.exception_handler",
 }
 
 DATABASES = {

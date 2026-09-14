@@ -24,7 +24,7 @@
             <div class="brand-name">QueryMind</div>
         </div>
         <h1>Create your workspace</h1>
-        <p class="lead">Your database stays yours. QueryMind asks questions against what you allow.</p>
+        <p class="lead">Choose chat if QueryMind should connect to PostgreSQL. Choose API if your app will run SQL and QueryMind should never see a database password.</p>
         {% if messages %}
         {% for message in messages %}
         <p class="alert alert-warning">{{ message }}</p>
@@ -32,6 +32,13 @@
         {% endif %}
         <form method="post" action="{% url 'register' %}">
             {% csrf_token %}
+            <div class="field">
+                <label>What do you want to use?</label>
+                <div class="choice-grid" style="margin-top:.4rem;">
+                    <label><input type="radio" name="product" value="chat"{% if product != 'api' %} checked{% endif %}> Chat</label>
+                    <label><input type="radio" name="product" value="api"{% if product == 'api' %} checked{% endif %}> API</label>
+                </div>
+            </div>
             <div class="field">
                 <label for="name">Name</label>
                 <input id="name" name="name" type="text" autocomplete="name" required>

@@ -10,7 +10,7 @@ from django.views.generic.detail import SingleObjectMixin
 
 from agent.graph import build_on_premise_graph
 from agent.state import QueryMindState
-from chat.ui import workspace_for
+from chat.ui import KIND_CHAT, chat_ready, workspace_for
 
 from .constants import ERROR_MESSAGES
 from .models import Conversation, Message
@@ -24,7 +24,7 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
     pk_url_kwarg = "conversation_id"
 
     def get_queryset(self):
-        return Conversation.objects.for_user(self.request.user)
+        return Conversation.objects.for_user(self.request.user, kind=KIND_CHAT)
 
     def get(self, request, *args, **kwargs):
         message_id = request.GET.get("message_id")
@@ -36,12 +36,12 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
         user_message = get_object_or_404(
             Message, id=message_id, conversation=conversation, is_user=True
         )
-        workspace = workspace_for(request.user)
-        if not workspace or not workspace.allowed_tables:
+        workspace = workspace_for(request.user, KIND_CHAT)
+        if not chat_ready(workspace):
             return StreamingHttpResponse(
                 _sse_error_stream(
                     "unavailable",
-                    "QueryMind will not run questions until you choose which tables it may use.",
+                    "QueryMind will not run questions until you choose which tables and columns it may use.",
                 ),
                 content_type="text/event-stream",
             )
@@ -60,6 +60,7 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
             connection_id=workspace.pk,
             workspace_id=workspace.pk,
             allowed_tables=list(workspace.allowed_tables or []),
+            allowed_columns=dict(workspace.allowed_columns or {}),
             schema_text=workspace.schema_text or "",
             conversation_context=conversation_context,
         )

@@ -15,6 +15,7 @@
 
     let current = 1;
     let discovered = [];
+    let discoveredColumns = {};
     let discoverOk = false;
     let readonlyRole = false;
 
@@ -37,13 +38,31 @@
 
     function renderTables() {
         tableList.innerHTML = discovered.map(function (table) {
+            const cols = discoveredColumns[table.name] || [];
+            const columnHtml = cols.map(function (column) {
+                const value = table.name + "." + column;
+                return (
+                    '<label class="page-meta" style="display:block;margin:.25rem 0 0 1.5rem;">' +
+                    '<input type="checkbox" name="allowed_columns" value="' + value + '" checked> ' +
+                    column +
+                    "</label>"
+                );
+            }).join("");
             return (
-                '<label class="table-row">' +
-                '<input type="checkbox" name="allowed_tables" value="' + table.name + '" checked>' +
-                "<div><strong>" + table.name + "</strong>" +
-                '<div class="page-meta">Discovered from your live PostgreSQL database</div></div></label>'
+                '<div class="table-row">' +
+                '<label><input type="checkbox" name="allowed_tables" value="' + table.name + '" checked> ' +
+                "<strong>" + table.name + "</strong></label>" +
+                '<div class="page-meta">Choose columns QueryMind may read</div>' +
+                columnHtml +
+                "</div>"
             );
         }).join("");
+    }
+
+    function selectedColumns() {
+        return Array.from(form.querySelectorAll("input[name=allowed_columns]:checked")).map(function (el) {
+            return el.value;
+        });
     }
 
     function renderReview() {
@@ -58,6 +77,7 @@
         const excluded = discovered.map(function (t) { return t.name; }).filter(function (name) {
             return allowed.indexOf(name) === -1;
         });
+        const columns = selectedColumns();
         reviewCard.innerHTML =
             "<p><strong>Work:</strong> " + industry + "</p>" +
             "<p>" + business + "</p>" +
@@ -65,8 +85,9 @@
             "<p><strong>Database:</strong> " + selectedDatabase() + " — " + (form.db_name.value || "") + " on " + (form.db_host.value || "") + "</p>" +
             "<p><strong>Role:</strong> " + (readonlyRole ? "Read-only" : "Connected (not a confirmed read-only role)") + "</p>" +
             "<p><strong>Allowed tables:</strong> " + (allowed.join(", ") || "None") + "</p>" +
+            "<p><strong>Allowed columns:</strong> " + (columns.join(", ") || "None") + "</p>" +
             "<p><strong>Unavailable to QueryMind:</strong> " + (excluded.join(", ") || "None") + "</p>" +
-            "<p class=\"page-meta\">If a table is unavailable, QueryMind will act as if it does not exist.</p>";
+            "<p class=\"page-meta\">If a table or column is unavailable, QueryMind will act as if it does not exist.</p>";
     }
 
     function showStep() {
@@ -111,11 +132,13 @@
             if (!result.data || !result.data.ok) {
                 showError((result.data && result.data.error) || "Could not connect to the database.");
                 discovered = [];
+                discoveredColumns = {};
                 return false;
             }
             discovered = (result.data.tables || []).map(function (name) {
                 return { name: name };
             });
+            discoveredColumns = result.data.columns || {};
             readonlyRole = !!result.data.is_readonly_role;
             discoverOk = discovered.length > 0;
             if (errorBox) errorBox.hidden = true;
@@ -173,6 +196,16 @@
             const allowed = form.querySelectorAll("input[name=allowed_tables]:checked");
             if (!allowed.length) {
                 alert("Choose at least one table QueryMind may use. This is a security boundary.");
+                return;
+            }
+            const missing = Array.from(allowed).filter(function (input) {
+                const prefix = input.value + ".";
+                return !Array.from(form.querySelectorAll("input[name=allowed_columns]:checked")).some(function (col) {
+                    return col.value.indexOf(prefix) === 0;
+                });
+            });
+            if (missing.length) {
+                alert("Choose at least one column on each allowed table.");
                 return;
             }
         }

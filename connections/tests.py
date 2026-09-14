@@ -6,9 +6,16 @@ from agent.graph import (
     route_after_on_premise_validation,
 )
 from agent.state import QueryMindState
+from connections.services.catalog import (
+    catalog_from_discovery_rows,
+    intersect_allow_lists,
+)
 from connections.services.schema_discovery import filter_schema_to_tables
 from connections.services.sql_validation import ReadOnlySQLExecutor
 from connections.services.workspace import explain_connection_error
+
+
+ORDERS_COLUMNS = {"orders": ["id", "total_amount", "payment_status"]}
 
 
 class AllowListValidationTests(SimpleTestCase):
@@ -18,19 +25,54 @@ class AllowListValidationTests(SimpleTestCase):
             executor.validate("SELECT id FROM orders")
 
     def test_rejects_tables_outside_allow_list(self):
-        executor = ReadOnlySQLExecutor(allowed_tables={"orders", "products"})
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders", "products"},
+            allowed_columns={
+                "orders": ["id"],
+                "products": ["id"],
+            },
+        )
         with self.assertRaises(PermissionError):
             executor.validate("SELECT email FROM staff")
 
     def test_allows_select_on_permitted_tables(self):
-        executor = ReadOnlySQLExecutor(allowed_tables={"orders", "products"})
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders", "products"},
+            allowed_columns=ORDERS_COLUMNS | {"products": ["id"]},
+        )
         expression = executor.validate(
             "SELECT id, total_amount FROM orders WHERE payment_status = 'PAID'"
         )
         self.assertIsNotNone(expression)
 
+    def test_rejects_forbidden_column_on_allowed_table(self):
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders"},
+            allowed_columns={"orders": ["id", "status"]},
+        )
+        with self.assertRaises(PermissionError):
+            executor.validate("SELECT email FROM orders")
+
+    def test_rejects_select_star(self):
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders"},
+            allowed_columns={"orders": ["id"]},
+        )
+        with self.assertRaises(PermissionError):
+            executor.validate("SELECT * FROM orders")
+
+    def test_allows_count_star(self):
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders"},
+            allowed_columns={"orders": ["id"]},
+        )
+        self.assertIsNotNone(executor.validate("SELECT COUNT(*) AS n FROM orders"))
+
     def test_rejects_non_select(self):
-        executor = ReadOnlySQLExecutor(allowed_tables={"orders"})
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders"},
+            allowed_columns={"orders": ["id"]},
+        )
         with self.assertRaises(ValueError):
             executor.validate("DELETE FROM orders")
 
@@ -63,6 +105,80 @@ RELATIONSHIPS:
 
     def test_empty_allow_list_returns_empty_schema(self):
         self.assertEqual(filter_schema_to_tables("TABLE: orders", []), "")
+
+    def test_drops_excluded_columns(self):
+        schema = """
+DATABASE: PostgreSQL
+
+TABLE: orders
+Description: Orders
+
+Columns:
+- id INTEGER
+- email TEXT
+- total_amount NUMERIC
+
+RELATIONSHIPS:
+
+- orders.user_id → staff.id
+"""
+        filtered = filter_schema_to_tables(
+            schema,
+            ["orders"],
+            {"orders": ["id", "total_amount"]},
+        )
+        self.assertIn("- id INTEGER", filtered)
+        self.assertIn("total_amount", filtered)
+        self.assertNotIn("email", filtered)
+        self.assertNotIn("staff.id", filtered)
+
+
+class CatalogIngestTests(SimpleTestCase):
+    def test_catalog_from_information_schema_rows(self):
+        catalog = catalog_from_discovery_rows(
+            [
+                {
+                    "table_name": "orders",
+                    "column_name": "id",
+                },
+                {
+                    "table_name": "orders",
+                    "column_name": "status",
+                },
+                {
+                    "table_name": "products",
+                    "column_name": "name",
+                },
+            ]
+        )
+        self.assertEqual(catalog["tables"], ["orders", "products"])
+        self.assertEqual(catalog["columns"]["orders"], ["id", "status"])
+
+    def test_intersect_ignores_invented_names(self):
+        tables, columns = intersect_allow_lists(
+            requested_tables=["orders", "secrets"],
+            requested_columns={
+                "orders": ["id", "ssn"],
+                "secrets": ["token"],
+            },
+            discovered_tables=["orders", "products"],
+            discovered_columns={
+                "orders": ["id", "status"],
+                "products": ["name"],
+            },
+        )
+        self.assertEqual(tables, ["orders"])
+        self.assertEqual(columns, {"orders": ["id"]})
+
+    def test_intersect_requires_at_least_one_column(self):
+        tables, columns = intersect_allow_lists(
+            requested_tables=["orders"],
+            requested_columns={"orders": []},
+            discovered_tables=["orders"],
+            discovered_columns={"orders": ["id"]},
+        )
+        self.assertEqual(tables, [])
+        self.assertEqual(columns, {})
 
 
 class GraphFailClosedTests(SimpleTestCase):

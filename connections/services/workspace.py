@@ -10,6 +10,7 @@ from connections.services.schema_discovery import (
     filter_schema_to_tables,
     transform_schema_for_llm,
 )
+from connections.services.catalog import columns_from_raw_schema
 
 
 SUPERUSER_REFUSAL = (
@@ -129,6 +130,7 @@ def discover_live_schema(
     db_user: str,
     password: str,
     allowed_tables: list[str] | None = None,
+    allowed_columns: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     conn = connect_postgres(
         host=host,
@@ -142,6 +144,7 @@ def discover_live_schema(
             assert_safe_role(cursor)
             raw = PostgreSQLSchemaDiscovery().discover_with_cursor(cursor)
             names = table_names_from_raw(raw)
+            discovered_columns = columns_from_raw_schema(raw)
             if not names:
                 raise WorkspaceConnectionError(
                     "Connected, but QueryMind found no tables to use."
@@ -149,9 +152,14 @@ def discover_live_schema(
             readonly = detect_readonly_role(cursor, names)
         schema_text = transform_schema_for_llm(raw)
         if allowed_tables:
-            schema_text = filter_schema_to_tables(schema_text, allowed_tables)
+            schema_text = filter_schema_to_tables(
+                schema_text,
+                allowed_tables,
+                allowed_columns,
+            )
         return {
             "tables": names,
+            "columns": discovered_columns,
             "schema_text": schema_text,
             "is_readonly_role": readonly,
         }
