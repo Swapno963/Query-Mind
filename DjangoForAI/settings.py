@@ -4,6 +4,7 @@ Django settings for DjangoForAI project.
 
 from pathlib import Path
 import os
+import sys
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -140,7 +141,10 @@ STATICFILES_DIRS = [
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-APP_MODE = parse_app_mode(os.getenv("APP_MODE"))
+_running_tests = "test" in sys.argv
+APP_MODE = parse_app_mode(
+    os.getenv("TEST_APP_MODE", "both") if _running_tests else os.getenv("APP_MODE")
+)
 CHAT_ENABLED = chat_enabled(APP_MODE)
 API_ENABLED = api_enabled(APP_MODE)
 
