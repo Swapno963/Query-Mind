@@ -74,7 +74,7 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
 
-          source: "docker-compose.deployment.yml,nginx.conf"
+          source: "docker-compose.deployment.yml"
 
           target: /opt/app
 
@@ -162,6 +162,7 @@ jobs:
             ECR_REGISTRY=${ECR_REGISTRY}
             BACKEND_IMAGE_TAG=${BACKEND_IMAGE_TAG}
             GEMINI_API_KEY=${GEMINI_API_KEY}
+            DJANGO_ALLOWED_HOSTS=chatapp.example.com,127.0.0.1
           
             EOF
             
@@ -205,8 +206,10 @@ jobs:
             echo "======================================="
 
             ####################################################
-            # Validate Docker Compose configuration
+            # Shared edge network (edge-nginx + ServeEasy)
             ####################################################
+            docker network inspect public_web >/dev/null 2>&1 || docker network create public_web
+            docker rm -f nginx 2>/dev/null || true
             docker compose \
               --env-file .env \
               -f docker-compose.deployment.yml \
@@ -275,7 +278,7 @@ jobs:
 
             echo "Waiting for API to become healthy..."
 
-            until [ "$(docker inspect -f '{{.State.Health.Status}}' education-api)" = "healthy" ]; do
+            until [ "$(docker inspect -f '{{.State.Health.Status}}' chat-llm)" = "healthy" ]; do
                 sleep 2
             done
 
