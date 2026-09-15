@@ -1,9 +1,9 @@
 from django.contrib.auth.views import LogoutView
 from django.urls import path
 from . import views
-from .views_stream import StreamChatView, RenderMarkdownView, StreamChatViewGraph
+from .views_stream import StreamChatViewGraph, RenderMarkdownView
 
-urlpatterns = [
+public_urlpatterns = [
     path("", views.LandingView.as_view(), name="landing"),
     path("login/", views.LoginView.as_view(), name="login"),
     path("register/", views.RegisterView.as_view(), name="register"),
@@ -12,6 +12,9 @@ urlpatterns = [
         LogoutView.as_view(next_page="landing"),
         name="logout",
     ),
+]
+
+chat_product_urlpatterns = [
     path("ask/", views.AskView.as_view(), name="ask"),
     path("onboarding/", views.OnboardingView.as_view(), name="onboarding"),
     path(
@@ -20,7 +23,6 @@ urlpatterns = [
         name="onboarding_discover",
     ),
     path("data/", views.DataAccessView.as_view(), name="data_access"),
-    path("developers/", views.DevelopersView.as_view(), name="developers"),
     path("chat/<int:conversation_id>/", views.ChatView.as_view(), name="chat"),
     path(
         "chat/<int:conversation_id>/stream/",
@@ -33,3 +35,9 @@ urlpatterns = [
         name="render_markdown",
     ),
 ]
+
+api_portal_urlpatterns = [
+    path("developers/", views.DevelopersView.as_view(), name="developers"),
+]
+
+urlpatterns = public_urlpatterns + chat_product_urlpatterns + api_portal_urlpatterns

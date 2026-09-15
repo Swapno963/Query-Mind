@@ -1,5 +1,6 @@
 import json
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -15,6 +16,7 @@ from django.views import View
 from django.views.generic import ListView, DetailView, TemplateView
 import markdown
 
+from DjangoForAI.app_mode import resolve_signup_product
 from connections.models import WorkspaceConnection
 from connections.services.catalog import intersect_allow_lists
 from connections.services.schema_discovery import filter_schema_to_tables
@@ -55,7 +57,7 @@ class LandingView(TemplateView):
 class LoginView(View):
     def get(self, request):
         if request.user.is_authenticated:
-            return redirect("ask")
+            return redirect(settings.LOGIN_REDIRECT_URL)
         return render(request, "auth/login.html")
 
     def post(self, request):
@@ -66,16 +68,18 @@ class LoginView(View):
             messages.error(request, "That email or password did not match.")
             return render(request, "auth/login.html", status=400)
         login(request, user)
-        return redirect("ask")
+        return redirect(settings.LOGIN_REDIRECT_URL)
 
 
 class RegisterView(View):
     def get(self, request):
         if request.user.is_authenticated:
-            return redirect("ask")
-        product = (request.GET.get("product") or "chat").strip().lower()
-        if product not in {"chat", "api"}:
-            product = "chat"
+            return redirect(settings.LOGIN_REDIRECT_URL)
+        product = resolve_signup_product(
+            request.GET.get("product"),
+            chat=settings.CHAT_ENABLED,
+            api=settings.API_ENABLED,
+        )
         return render(request, "auth/register.html", {"product": product})
 
     def post(self, request):
@@ -83,9 +87,11 @@ class RegisterView(View):
         email = (request.POST.get("email") or "").strip().lower()
         password = request.POST.get("password") or ""
         confirm = request.POST.get("password_confirm") or ""
-        product = (request.POST.get("product") or "chat").strip().lower()
-        if product not in {"chat", "api"}:
-            product = "chat"
+        product = resolve_signup_product(
+            request.POST.get("product"),
+            chat=settings.CHAT_ENABLED,
+            api=settings.API_ENABLED,
+        )
 
         def fail():
             return render(request, "auth/register.html", {"product": product}, status=400)

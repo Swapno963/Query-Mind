@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import User
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 
@@ -387,3 +387,68 @@ class WorkspaceProductTests(TestCase):
         )
         html = self.client.get(reverse("ask")).content.decode()
         self.assertNotIn("API unpaid orders", html)
+
+
+def reload_urlconf():
+    from importlib import import_module, reload
+
+    from django.conf import settings
+    from django.urls import clear_url_caches
+
+    clear_url_caches()
+    reload(import_module(settings.ROOT_URLCONF))
+
+
+class AppModeRoutingTests(TestCase):
+    def tearDown(self):
+        reload_urlconf()
+        super().tearDown()
+
+    @override_settings(
+        APP_MODE="api",
+        CHAT_ENABLED=False,
+        API_ENABLED=True,
+        LOGIN_REDIRECT_URL="developers",
+    )
+    def test_api_mode_hides_chat_routes(self):
+        reload_urlconf()
+        self.assertEqual(self.client.get("/ask/").status_code, 404)
+        health = self.client.get("/api/v1/health")
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual(health.json()["mode"], "api")
+        self.assertEqual(self.client.get("/developers/").status_code, 302)
+
+    @override_settings(
+        APP_MODE="chat",
+        CHAT_ENABLED=True,
+        API_ENABLED=False,
+        LOGIN_REDIRECT_URL="ask",
+    )
+    def test_chat_mode_hides_api_routes(self):
+        reload_urlconf()
+        self.assertEqual(self.client.get("/ask/").status_code, 302)
+        self.assertEqual(self.client.get("/api/v1/health").status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/chat/").status_code, 404)
+        self.assertEqual(self.client.get("/developers/").status_code, 404)
+
+    @override_settings(
+        APP_MODE="api",
+        CHAT_ENABLED=False,
+        API_ENABLED=True,
+        LOGIN_REDIRECT_URL="developers",
+    )
+    def test_api_mode_register_ignores_chat_product(self):
+        reload_urlconf()
+        response = Client().post(
+            reverse("register"),
+            {
+                "name": "Ada",
+                "email": "ada-api-mode@example.com",
+                "password": "CorrectHorseBattery9",
+                "password_confirm": "CorrectHorseBattery9",
+                "product": "chat",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("developers"))
+

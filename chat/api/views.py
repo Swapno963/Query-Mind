@@ -3,8 +3,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
 
-from django.http import JsonResponse
-
 from agent.graph import build_api_query_graph
 from agent.state import QueryMindState
 from chat.api.chat_service import ChatService
@@ -32,10 +30,6 @@ from connections.services.catalog import (
     schema_text_from_catalog,
 )
 from connections.services.schema_discovery import filter_schema_to_tables
-
-
-def health_check(request):
-    return JsonResponse({"status": "ok", "version": "1.0.0"})
 
 
 def get_or_create_workspace(user) -> WorkspaceConnection:

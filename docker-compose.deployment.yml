@@ -7,6 +7,7 @@ services:
       - .env
     environment:
       SQLITE_PATH: /app/data/db.sqlite3
+      APP_MODE: ${APP_MODE:-both}
     volumes:
       - sqlite_data:/app/data
     # Works with the current image (no entrypoint) and is ignored as extra

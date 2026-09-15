@@ -20,7 +20,11 @@
         <a class="hide-sm" href="#how-it-works">How it works</a>
         <a class="hide-sm" href="#trust">Trust</a>
         <a href="{% url 'login' %}">Log in</a>
+        {% if chat_enabled %}
         <a class="btn btn-primary" href="{% url 'register' %}?product=chat">Get started with chat</a>
+        {% elif api_enabled %}
+        <a class="btn btn-primary" href="{% url 'register' %}?product=api">Use the API</a>
+        {% endif %}
     </nav>
 </header>
 
@@ -28,8 +32,12 @@
     <h1>Ask your data in plain English.</h1>
     <p>QueryMind gives non-SQL teams easy, controlled access to their own databases. You think in business questions. QueryMind handles the database complexity.</p>
     <div class="hero-actions">
+        {% if chat_enabled %}
         <a class="btn btn-primary" href="{% url 'register' %}?product=chat">Get started with chat</a>
-        <a class="btn btn-secondary" href="{% url 'register' %}?product=api">Use the API</a>
+        {% endif %}
+        {% if api_enabled %}
+        <a class="btn {% if chat_enabled %}btn-secondary{% else %}btn-primary{% endif %}" href="{% url 'register' %}?product=api">Use the API</a>
+        {% endif %}
         <a class="btn btn-ghost" href="{% url 'login' %}">Log in</a>
     </div>
 </section>

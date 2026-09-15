@@ -90,6 +90,7 @@ jobs:
           ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
           BACKEND_IMAGE_TAG: ${{ inputs.backend_image_tag }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY}}
+          APP_MODE: ${{ secrets.APP_MODE }}
 
 
 
@@ -104,6 +105,7 @@ jobs:
             ECR_REGISTRY,
             BACKEND_IMAGE_TAG,
             GEMINI_API_KEY,
+            APP_MODE,
 
            
 
@@ -162,6 +164,7 @@ jobs:
             ECR_REGISTRY=${ECR_REGISTRY}
             BACKEND_IMAGE_TAG=${BACKEND_IMAGE_TAG}
             GEMINI_API_KEY=${GEMINI_API_KEY}
+            APP_MODE=${APP_MODE:-both}
             DJANGO_ALLOWED_HOSTS=chatapp.clustorflow.com,127.0.0.1
           
             EOF

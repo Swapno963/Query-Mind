@@ -12,7 +12,7 @@
         <button class="sidebar-close" type="button" data-sidebar-close aria-label="Close menu">
             <i class="bi bi-x-lg"></i>
         </button>
-        <a class="brand" href="{% url 'ask' %}">
+        <a class="brand" href="{% url app_home_url_name %}">
             <div class="brand-mark">QM</div>
             <div>
                 <div class="brand-name">QueryMind</div>
@@ -20,21 +20,26 @@
             </div>
         </a>
         <div class="sidebar-nav">
+            {% if chat_enabled %}
             <a class="new-chat-btn" href="{% url 'ask' %}">
                 <i class="bi bi-plus-lg"></i> New question
             </a>
             <a class="nav-link {% if active_nav == 'data' %}active{% endif %}" href="{% url 'data_access' %}">
                 <i class="bi bi-database"></i> Your data
             </a>
+            {% endif %}
+            {% if api_enabled %}
             <a class="nav-link {% if active_nav == 'api' %}active{% endif %}" href="{% url 'developers' %}">
                 <i class="bi bi-code-slash"></i> API
             </a>
-            {% if not data_ready %}
+            {% endif %}
+            {% if chat_enabled and not data_ready %}
             <a class="nav-link {% if active_nav == 'onboarding' %}active{% endif %}" href="{% url 'onboarding' %}">
                 <i class="bi bi-sliders"></i> Set up your data
             </a>
             {% endif %}
         </div>
+        {% if chat_enabled %}
         <div class="sidebar-label">Question history</div>
         <div class="sidebar-list">
             {% if recent_conversations %}
@@ -51,6 +56,7 @@
                 <p class="recent-chat-date" style="padding:0.5rem 0.7rem;">No questions yet.</p>
             {% endif %}
         </div>
+        {% endif %}
         <div class="sidebar-footer">
             {% if signed_in %}
             <div class="account-link">

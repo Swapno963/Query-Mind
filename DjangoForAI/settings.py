@@ -7,6 +7,8 @@ import os
 
 from django.core.exceptions import ImproperlyConfigured
 
+from DjangoForAI.app_mode import api_enabled, chat_enabled, parse_app_mode
+
 try:
     from dotenv import load_dotenv
 
@@ -71,6 +73,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "DjangoForAI.context_processors.app_features",
             ],
         },
     },
@@ -137,6 +140,10 @@ STATICFILES_DIRS = [
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+APP_MODE = parse_app_mode(os.getenv("APP_MODE"))
+CHAT_ENABLED = chat_enabled(APP_MODE)
+API_ENABLED = api_enabled(APP_MODE)
+
 LOGIN_URL = "login"
-LOGIN_REDIRECT_URL = "ask"
+LOGIN_REDIRECT_URL = "ask" if CHAT_ENABLED else "developers"
 LOGOUT_REDIRECT_URL = "landing"

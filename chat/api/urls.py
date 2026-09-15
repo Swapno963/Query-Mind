@@ -1,5 +1,6 @@
 from django.urls import path
 
+from DjangoForAI.health import health_check
 from .views import (
     AccessAllowListView,
     AccessRequestView,
@@ -13,7 +14,6 @@ from .views import (
     MessagesView,
     ProfileView,
     WorkspaceView,
-    health_check,
 )
 
 

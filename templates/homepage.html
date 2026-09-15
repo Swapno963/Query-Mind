@@ -54,7 +54,9 @@
         <p>Chat needs a live PostgreSQL connection and the tables you allow. If you only want the API, QueryMind should never connect to your database.</p>
         <p>
             <a class="btn btn-primary" href="{% url 'onboarding' %}">Set up chat</a>
+            {% if api_enabled %}
             <a class="btn btn-secondary" href="{% url 'developers' %}">Use the API</a>
+            {% endif %}
         </p>
     </div>
 </div>

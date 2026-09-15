@@ -52,7 +52,9 @@
             <p>Tell QueryMind about your work and choose which tables chat may use. The API uses a separate workspace and never needs this connection.</p>
             <p>
                 <a class="btn btn-primary" href="{% url 'onboarding' %}">Set up chat</a>
+                {% if api_enabled %}
                 <a class="btn btn-secondary" href="{% url 'developers' %}">Use the API</a>
+                {% endif %}
             </p>
         </div>
         {% endif %}
