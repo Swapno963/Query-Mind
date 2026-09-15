@@ -11,7 +11,7 @@ from ..state import QueryMindState
 
 def planner(state: QueryMindState) -> dict[str, Any]:
     """
-    Analyze the user's question and create a high-level plan.
+    Analyze the user's question and create a high-level plan. test
 
     This node does NOT:
     - generate SQL
