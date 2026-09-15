@@ -3,7 +3,7 @@ name: Publish Docker Image
 on:
   push:
     branches:
-      - gemini_api
+      - LangGraph_with_onprimise_and_api
     paths-ignore:
       # Documentation
       - "**/*.md"
