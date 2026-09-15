@@ -162,7 +162,7 @@ jobs:
             ECR_REGISTRY=${ECR_REGISTRY}
             BACKEND_IMAGE_TAG=${BACKEND_IMAGE_TAG}
             GEMINI_API_KEY=${GEMINI_API_KEY}
-            DJANGO_ALLOWED_HOSTS=chatapp.example.com,127.0.0.1
+            DJANGO_ALLOWED_HOSTS=chatapp.clustorflow.com,127.0.0.1
           
             EOF
             
