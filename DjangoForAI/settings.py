@@ -30,6 +30,21 @@ DEBUG = str(debug_raw).lower() in {"1", "true", "yes"}
 allowed_hosts_raw = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
 ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_raw.split(",") if host.strip()]
 
+csrf_origins_raw = os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "")
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip() for origin in csrf_origins_raw.split(",") if origin.strip()
+]
+if not CSRF_TRUSTED_ORIGINS:
+    for host in ALLOWED_HOSTS:
+        if not host or host.startswith(".") or host in {"localhost", "127.0.0.1"}:
+            continue
+        CSRF_TRUSTED_ORIGINS.append(f"https://{host}")
+        if DEBUG:
+            CSRF_TRUSTED_ORIGINS.append(f"http://{host}")
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+
 if not DEBUG:
     if SECRET_KEY.startswith("django-insecure-"):
         raise ImproperlyConfigured(

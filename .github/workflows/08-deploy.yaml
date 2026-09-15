@@ -165,7 +165,8 @@ jobs:
             BACKEND_IMAGE_TAG=${BACKEND_IMAGE_TAG}
             GEMINI_API_KEY=${GEMINI_API_KEY}
             APP_MODE=${APP_MODE:-both}
-            DJANGO_ALLOWED_HOSTS=chatapp.clustorflow.com,127.0.0.1
+            DJANGO_ALLOWED_HOSTS=chatapp.clustorflow.com,localhost,127.0.0.1
+            DJANGO_CSRF_TRUSTED_ORIGINS=https://chatapp.clustorflow.com
           
             EOF
             
@@ -275,9 +276,25 @@ jobs:
 
             echo "Waiting for API to become healthy..."
 
-            until [ "$(docker inspect -f '{{.State.Health.Status}}' chat-llm)" = "healthy" ]; do
-                sleep 2
-            done
+            timeout_seconds=120
+            elapsed=0
+            while true; do
+              health_status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' chat-llm)"
+              echo "chat-llm health: ${health_status} (${elapsed}s)"
 
+              if [ "$health_status" = "healthy" ]; then
+                break
+              fi
+
+              if [ "$elapsed" -ge "$timeout_seconds" ]; then
+                echo "API did not become healthy within ${timeout_seconds}s."
+                docker inspect --format='{{json .State.Health}}' chat-llm || true
+                docker compose --env-file .env -f docker-compose.deployment.yml logs --tail=150 api || true
+                exit 1
+              fi
+
+              sleep 5
+              elapsed=$((elapsed + 5))
+            done
 
             echo "Deployment completed successfully."
