@@ -89,10 +89,13 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "chat.api.exception_handler.exception_handler",
 }
 
+sqlite_path = os.getenv("SQLITE_PATH", str(BASE_DIR / "db.sqlite3"))
+Path(sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": sqlite_path,
     },
 }
 

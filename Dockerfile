@@ -44,11 +44,12 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app /app
 
 # Create directories Django may need to write to
-RUN mkdir -p /app/staticfiles /app/media \
+RUN mkdir -p /app/staticfiles /app/media /app/data \
+    && chmod +x /app/docker-entrypoint.sh \
     && chown -R django:django /app
 
 USER django
 
 EXPOSE 8000
 
-CMD ["gunicorn", "DjangoForAI.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "--graceful-timeout", "30"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

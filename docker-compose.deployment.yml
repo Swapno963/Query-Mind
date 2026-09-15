@@ -3,14 +3,20 @@ services:
     image: ${ECR_REGISTRY}:${BACKEND_IMAGE_TAG}
     container_name: chat-llm
     restart: unless-stopped
-    # depends_on:
-    #   migrate:
-    #     condition: service_completed_successfully
-
     env_file:
       - .env
-    # volumes:
-    #   - sqlite_data:/app/db.sqlite3
+    environment:
+      SQLITE_PATH: /app/data/db.sqlite3
+    volumes:
+      - sqlite_data:/app/data
+    # Works with the current image (no entrypoint) and is ignored as extra
+    # args once the image uses docker-entrypoint.sh.
+    command:
+      [
+        "sh",
+        "-c",
+        "python manage.py migrate --noinput && gunicorn DjangoForAI.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120 --graceful-timeout 30",
+      ]
 
     healthcheck:
       test:
@@ -27,16 +33,8 @@ services:
     networks:
       - public_web
 
-  # migrate:
-  #   image: ${ECR_REGISTRY}:${BACKEND_IMAGE_TAG}
-  #   command: python manage.py migrate
-  #   env_file:
-  #     - .env
-    # volumes:
-    #   - sqlite_data:/app/db.sqlite3
-
-# volumes:
-#   sqlite_data:
+volumes:
+  sqlite_data:
 
 networks:
   public_web:
