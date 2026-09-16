@@ -2,7 +2,7 @@ from typing import Any
 
 from connections.models import WorkspaceConnection
 from connections.services.workspace import register_workspace_database
-from connections.services.sql_validation import ReadOnlySQLExecutor
+from connections.services.fewshot import record_success
 
 from ..state import QueryMindState
 
@@ -72,6 +72,16 @@ def sql_executor(state: QueryMindState) -> dict[str, Any]:
         for row in executor.stream(sql):
             rows.append(row)
         columns = list(rows[0].keys()) if rows else []
+        linked = list((state.intent or {}).get("tables") or state.allowed_tables or [])
+        try:
+            record_success(
+                workspace_id=state.workspace_id,
+                question=state.question,
+                sql=sql,
+                linked_tables=linked,
+            )
+        except Exception:
+            pass
         return {
             "execution_result": {
                 "success": True,

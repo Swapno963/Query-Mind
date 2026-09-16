@@ -71,6 +71,8 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
                 "schema": "Looking at your data…",
                 "sql_generator": "Looking at your data…",
                 "sql_validator": "Checking the question is safe…",
+                "explain_sql": "Checking the query plan…",
+                "sql_critic": "Checking the question matches your data…",
                 "sql_repair": "Checking the question is safe…",
                 "sql_executor": "Fetching results…",
                 "result_formatter": "Writing your answer…",

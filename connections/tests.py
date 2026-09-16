@@ -1,9 +1,12 @@
 from django.test import SimpleTestCase
 
 from agent.graph import (
+    route_after_explain,
+    route_after_on_premise_critic,
     route_after_on_premise_error_analysis,
     route_after_on_premise_execution,
     route_after_on_premise_validation,
+    route_after_planner,
 )
 from agent.state import QueryMindState
 from connections.services.catalog import (
@@ -11,6 +14,8 @@ from connections.services.catalog import (
     intersect_allow_lists,
 )
 from connections.services.schema_discovery import filter_schema_to_tables
+from agent.intent import bind_intent_to_allow_list, rule_based_intent
+from connections.services.sql_critic import critique_sql
 from connections.services.sql_validation import ReadOnlySQLExecutor
 from connections.services.workspace import explain_connection_error
 
@@ -132,6 +137,36 @@ RELATIONSHIPS:
         self.assertNotIn("email", filtered)
         self.assertNotIn("staff.id", filtered)
 
+    def test_keeps_values_for_allowed_columns(self):
+        schema = """
+DATABASE: PostgreSQL
+
+TABLE: orders
+Description: Orders
+Grain: one row per id
+
+Columns:
+- id INTEGER
+- payment_status VARCHAR
+  Values: UNPAID, PAID, REFUNDED
+- secret TEXT
+
+BUSINESS DEFINITIONS:
+
+- "paid" means orders.payment_status = 'PAID'
+- "staff" means staff.role = 'admin'
+"""
+        filtered = filter_schema_to_tables(
+            schema,
+            ["orders"],
+            {"orders": ["id", "payment_status"]},
+        )
+        self.assertIn("Values: UNPAID, PAID, REFUNDED", filtered)
+        self.assertIn("Grain: one row per id", filtered)
+        self.assertIn("payment_status = 'PAID'", filtered)
+        self.assertNotIn("secret", filtered)
+        self.assertNotIn("staff.role", filtered)
+
 
 class CatalogIngestTests(SimpleTestCase):
     def test_catalog_from_information_schema_rows(self):
@@ -198,9 +233,21 @@ class GraphFailClosedTests(SimpleTestCase):
         )
         self.assertEqual(route_after_on_premise_validation(state), "refuse")
 
-    def test_valid_sql_executes(self):
+    def test_valid_sql_goes_to_explain(self):
         state = self._state(validation_result={"valid": True})
-        self.assertEqual(route_after_on_premise_validation(state), "execute")
+        self.assertEqual(route_after_on_premise_validation(state), "explain")
+
+    def test_explain_ok_goes_to_critic(self):
+        state = self._state(explain_result={"ok": True})
+        self.assertEqual(route_after_explain(state), "critic")
+
+    def test_critic_ok_goes_to_execute(self):
+        state = self._state(critic_result={"ok": True})
+        self.assertEqual(route_after_on_premise_critic(state), "execute")
+
+    def test_invalid_intent_refuses(self):
+        state = self._state(intent={"valid": False}, status="failed")
+        self.assertEqual(route_after_planner(state), "refuse")
 
     def test_zero_rows_are_success_path(self):
         state = self._state(
@@ -229,3 +276,99 @@ class ConnectionErrorCopyTests(SimpleTestCase):
 
     def test_network_failure_is_plain_language(self):
         self.assertIn("host", explain_connection_error(Exception("connection refused")))
+
+
+RELATIONSHIPS = [
+    {
+        "source_table": "order_items",
+        "source_column": "order_id",
+        "target_table": "orders",
+        "target_column": "id",
+    }
+]
+
+
+class SqlCriticTests(SimpleTestCase):
+    def test_fan_out_sum_is_rejected(self):
+        result = critique_sql(
+            "SELECT SUM(orders.total_amount) FROM orders JOIN order_items ON order_items.order_id = orders.id",
+            intent={"tables": ["orders"], "entity": "orders", "metric": {"expr": "SUM(orders.total_amount)"}},
+            relationships=RELATIONSHIPS,
+            allowed_tables=["orders", "order_items"],
+        )
+        self.assertFalse(result["ok"])
+        self.assertIn("fan_out_on_sum", result["issues"])
+
+    def test_order_only_sum_is_ok(self):
+        result = critique_sql(
+            "SELECT SUM(orders.total_amount) FROM orders WHERE orders.payment_status = 'PAID'",
+            intent={"tables": ["orders"], "entity": "orders", "metric": {"expr": "SUM(orders.total_amount)"}},
+            relationships=RELATIONSHIPS,
+            allowed_tables=["orders", "order_items"],
+        )
+        self.assertTrue(result["ok"])
+
+    def test_exists_avoids_fan_out(self):
+        result = critique_sql(
+            "SELECT SUM(orders.total_amount) FROM orders WHERE EXISTS (SELECT 1 FROM order_items WHERE order_items.order_id = orders.id)",
+            intent={"tables": ["orders"], "entity": "orders"},
+            relationships=RELATIONSHIPS,
+            allowed_tables=["orders", "order_items"],
+        )
+        self.assertTrue(result["ok"])
+
+
+class IntentBindTests(SimpleTestCase):
+    def test_rejects_unknown_entity(self):
+        bound = bind_intent_to_allow_list(
+            {"entity": "staff", "tables": ["staff"], "output": "row_list"},
+            ["orders"],
+            {"orders": ["id"]},
+        )
+        self.assertFalse(bound["valid"])
+
+    def test_revenue_rule_uses_orders(self):
+        ir = rule_based_intent(
+            "How much revenue did we make from paid orders?",
+            ["orders"],
+            {"orders": ["id", "total_amount", "payment_status", "ordered_at"]},
+            {
+                "metrics": {
+                    "revenue": {
+                        "expr": "SUM(orders.total_amount)",
+                        "table": "orders",
+                        "grain": "order",
+                        "filters": [{"column": "orders.payment_status", "op": "eq", "value": "PAID"}],
+                    }
+                },
+                "aliases": {"paid": {"column": "orders.payment_status", "value": "PAID"}},
+            },
+        )
+        self.assertTrue(ir["valid"])
+        self.assertEqual(ir["entity"], "orders")
+        self.assertEqual(ir["grain"], "order")
+
+
+class EvalMetricsTests(SimpleTestCase):
+    def test_fanout_sql_fails_eval_trap(self):
+        from eval.metrics import score_prediction
+
+        case = {
+            "id": "fanout_revenue_with_items",
+            "category": "fan_out",
+            "allowed_tables": ["orders", "order_items"],
+            "allowed_columns": {
+                "orders": ["id", "total_amount", "payment_status"],
+                "order_items": ["id", "order_id", "unit_price", "quantity"],
+            },
+            "gold_tables": ["orders"],
+            "gold_grain": "order",
+            "must_not_join": ["order_items"],
+            "must_refuse": False,
+        }
+        sql = (
+            "SELECT SUM(orders.total_amount) FROM orders "
+            "JOIN order_items ON order_items.order_id = orders.id"
+        )
+        scored = score_prediction(case, sql=sql, refused=False, linked_tables=["orders", "order_items"])
+        self.assertFalse(scored["fan_out_ok"])

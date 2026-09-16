@@ -248,8 +248,20 @@ def _run_sql_generation(user, content: str):
         schema_text=workspace.schema_text or "",
     )
     final_state = build_api_query_graph().invoke(state)
+    if not isinstance(final_state, dict):
+        final_state = {
+            "sql": getattr(final_state, "sql", None),
+            "validation_result": getattr(final_state, "validation_result", {}) or {},
+            "critic_result": getattr(final_state, "critic_result", {}) or {},
+            "answer_kind": getattr(final_state, "answer_kind", None),
+            "database_error": getattr(final_state, "database_error", None),
+        }
     validation = final_state.get("validation_result") or {}
-    executable = bool(validation.get("valid"))
+    critic = final_state.get("critic_result") or {}
+    executable = bool(validation.get("valid") and critic.get("ok", True))
+    if final_state.get("answer_kind") in {"unavailable", "connection_failed", "invalid_sql"}:
+        if not critic.get("ok", False):
+            executable = False
     sql = final_state.get("sql") if executable else None
     kind = validation.get("kind") or ("ok" if executable else "unavailable")
     stop_reason = "sql" if executable else "refusal"
@@ -268,6 +280,7 @@ def _run_sql_generation(user, content: str):
                 {
                     "type": "text",
                     "text": validation.get("error")
+                    or final_state.get("database_error")
                     or "QueryMind could not read that from your allowed tables and columns.",
                 }
             ]

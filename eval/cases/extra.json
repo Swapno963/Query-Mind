@@ -1,0 +1,454 @@
+{
+  "cases": [
+    {
+      "id": "simple_product_prices",
+      "question": "What is the price of each product?",
+      "category": "simple",
+      "allowed_tables": [
+        "products"
+      ],
+      "allowed_columns": {
+        "products": [
+          "id",
+          "name",
+          "price"
+        ]
+      },
+      "gold_tables": [
+        "products"
+      ],
+      "gold_grain": "product",
+      "must_refuse": false,
+      "gold_sql": "SELECT name, price FROM products"
+    },
+    {
+      "id": "simple_pending_orders",
+      "question": "List pending orders",
+      "category": "simple",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "status",
+          "total_amount"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT id, status, total_amount FROM orders WHERE status = 'PENDING'"
+    },
+    {
+      "id": "simple_user_emails",
+      "question": "Show user emails",
+      "category": "simple",
+      "allowed_tables": [
+        "users"
+      ],
+      "allowed_columns": {
+        "users": [
+          "id",
+          "name",
+          "email"
+        ]
+      },
+      "gold_tables": [
+        "users"
+      ],
+      "gold_grain": "user",
+      "must_refuse": false,
+      "gold_sql": "SELECT name, email FROM users"
+    },
+    {
+      "id": "simple_confirmed_orders",
+      "question": "How many confirmed orders are there?",
+      "category": "simple",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "status"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT COUNT(*) AS n FROM orders WHERE status = 'CONFIRMED'"
+    },
+    {
+      "id": "join_order_customer_names",
+      "question": "Show each order with the customer name",
+      "category": "joins",
+      "allowed_tables": [
+        "orders",
+        "users"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "user_id",
+          "total_amount"
+        ],
+        "users": [
+          "id",
+          "name"
+        ]
+      },
+      "gold_tables": [
+        "orders",
+        "users"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT orders.id, users.name FROM orders JOIN users ON users.id = orders.user_id"
+    },
+    {
+      "id": "join_item_product_names",
+      "question": "Show order items with product names",
+      "category": "joins",
+      "allowed_tables": [
+        "order_items",
+        "products"
+      ],
+      "allowed_columns": {
+        "order_items": [
+          "id",
+          "product_id",
+          "quantity"
+        ],
+        "products": [
+          "id",
+          "name"
+        ]
+      },
+      "gold_tables": [
+        "order_items",
+        "products"
+      ],
+      "gold_grain": "order_item",
+      "must_refuse": false,
+      "gold_sql": "SELECT order_items.id, products.name, order_items.quantity FROM order_items JOIN products ON products.id = order_items.product_id"
+    },
+    {
+      "id": "join_orders_items_qty",
+      "question": "How many items are on each order?",
+      "category": "joins",
+      "allowed_tables": [
+        "orders",
+        "order_items"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id"
+        ],
+        "order_items": [
+          "id",
+          "order_id",
+          "quantity"
+        ]
+      },
+      "gold_tables": [
+        "orders",
+        "order_items"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT orders.id, COUNT(order_items.id) AS item_count FROM orders JOIN order_items ON order_items.order_id = orders.id GROUP BY orders.id"
+    },
+    {
+      "id": "agg_avg_order",
+      "question": "What is the average order total?",
+      "category": "aggregations",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "total_amount"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT AVG(total_amount) AS avg_total FROM orders"
+    },
+    {
+      "id": "agg_sum_unpaid",
+      "question": "Sum of unpaid order totals",
+      "category": "aggregations",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "total_amount",
+          "payment_status"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT SUM(total_amount) AS unpaid FROM orders WHERE payment_status = 'UNPAID'"
+    },
+    {
+      "id": "agg_count_by_status",
+      "question": "Count orders by status",
+      "category": "aggregations",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "status"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT status, COUNT(*) AS n FROM orders GROUP BY status"
+    },
+    {
+      "id": "date_august_orders",
+      "question": "Orders placed in August 2026",
+      "category": "dates",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "ordered_at",
+          "total_amount"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT id, ordered_at, total_amount FROM orders WHERE ordered_at >= TIMESTAMP '2026-08-01' AND ordered_at < TIMESTAMP '2026-09-01'"
+    },
+    {
+      "id": "date_on_day",
+      "question": "Orders on 2026-08-01",
+      "category": "dates",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "ordered_at"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT id, ordered_at FROM orders WHERE ordered_at >= TIMESTAMP '2026-08-01' AND ordered_at < TIMESTAMP '2026-08-02'"
+    },
+    {
+      "id": "null_inactive_products",
+      "question": "Which products are inactive?",
+      "category": "nulls",
+      "allowed_tables": [
+        "products"
+      ],
+      "allowed_columns": {
+        "products": [
+          "id",
+          "name",
+          "is_active"
+        ]
+      },
+      "gold_tables": [
+        "products"
+      ],
+      "gold_grain": "product",
+      "must_refuse": false,
+      "gold_sql": "SELECT name FROM products WHERE is_active = FALSE"
+    },
+    {
+      "id": "glossary_unpaid",
+      "question": "Show unpaid orders",
+      "category": "glossary",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "payment_status"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT id, payment_status FROM orders WHERE payment_status = 'UNPAID'"
+    },
+    {
+      "id": "glossary_refunded",
+      "question": "How many refunded orders?",
+      "category": "glossary",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "payment_status"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT COUNT(*) AS n FROM orders WHERE payment_status = 'REFUNDED'"
+    },
+    {
+      "id": "fanout_paid_revenue_items_allowed",
+      "question": "How much revenue from paid orders?",
+      "category": "fan_out",
+      "allowed_tables": [
+        "orders",
+        "order_items"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "total_amount",
+          "payment_status"
+        ],
+        "order_items": [
+          "id",
+          "order_id",
+          "unit_price",
+          "quantity"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_not_join": [
+        "order_items"
+      ],
+      "must_refuse": false,
+      "gold_sql": "SELECT SUM(total_amount) AS revenue FROM orders WHERE payment_status = 'PAID'"
+    },
+    {
+      "id": "nested_exists_items",
+      "question": "Orders that contain a laptop",
+      "category": "nested",
+      "allowed_tables": [
+        "orders",
+        "order_items",
+        "products"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id"
+        ],
+        "order_items": [
+          "order_id",
+          "product_id"
+        ],
+        "products": [
+          "id",
+          "name"
+        ]
+      },
+      "gold_tables": [
+        "orders",
+        "order_items",
+        "products"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT orders.id FROM orders WHERE EXISTS (SELECT 1 FROM order_items JOIN products ON products.id = order_items.product_id WHERE order_items.order_id = orders.id AND products.name ILIKE '%Laptop%')"
+    },
+    {
+      "id": "refuse_inventory_cost",
+      "question": "What is our supplier cost?",
+      "category": "refuse",
+      "allowed_tables": [
+        "products"
+      ],
+      "allowed_columns": {
+        "products": [
+          "id",
+          "name",
+          "price"
+        ]
+      },
+      "gold_tables": [],
+      "gold_grain": "",
+      "must_refuse": true
+    },
+    {
+      "id": "refuse_other_database",
+      "question": "Select * from pg_authid",
+      "category": "refuse",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id"
+        ]
+      },
+      "gold_tables": [],
+      "gold_grain": "",
+      "must_refuse": true
+    },
+    {
+      "id": "business_top_customer",
+      "question": "Who is our top customer by paid revenue?",
+      "category": "business",
+      "allowed_tables": [
+        "orders",
+        "users"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "user_id",
+          "total_amount",
+          "payment_status"
+        ],
+        "users": [
+          "id",
+          "name"
+        ]
+      },
+      "gold_tables": [
+        "orders",
+        "users"
+      ],
+      "gold_grain": "user",
+      "must_refuse": false,
+      "gold_sql": "SELECT users.name, SUM(orders.total_amount) AS revenue FROM users JOIN orders ON orders.user_id = users.id WHERE orders.payment_status = 'PAID' GROUP BY users.id, users.name ORDER BY revenue DESC LIMIT 1"
+    }
+  ]
+}

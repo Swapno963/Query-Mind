@@ -1,4 +1,43 @@
+from __future__ import annotations
+
+import re
+from typing import Any
+
 from django.db import connections
+
+_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SKIP_TYPES = {
+    "integer",
+    "bigint",
+    "smallint",
+    "numeric",
+    "double precision",
+    "real",
+    "timestamp with time zone",
+    "timestamp without time zone",
+    "date",
+    "json",
+    "jsonb",
+    "bytea",
+    "uuid",
+}
+_SKIP_NAME_PARTS = (
+    "id",
+    "email",
+    "password",
+    "token",
+    "secret",
+    "hash",
+    "uuid",
+    "phone",
+    "ssn",
+)
+
+
+def _safe_ident(name: str) -> str:
+    if not _IDENT.match(name or ""):
+        raise ValueError(f"Unsafe identifier: {name!r}")
+    return name
 
 
 class PostgreSQLSchemaDiscovery:
@@ -7,14 +46,18 @@ class PostgreSQLSchemaDiscovery:
         self.alias = alias
 
     def discover_with_cursor(self, cursor):
-        return {
+        raw = {
             "tables": self.get_tables(cursor),
             "columns": self.get_columns(cursor),
             "primary_keys": self.get_primary_keys(cursor),
             "foreign_keys": self.get_foreign_keys(cursor),
             "unique_constraints": self.get_unique_constraints(cursor),
             "indexes": self.get_indexes(cursor),
+            "table_comments": self.get_table_comments(cursor),
+            "column_comments": self.get_column_comments(cursor),
         }
+        raw["distinct_values"] = self.sample_distinct_values(cursor, raw)
+        return raw
 
     def discover(self):
         connection = connections[self.alias]
@@ -163,8 +206,96 @@ class PostgreSQLSchemaDiscovery:
 
         return cursor.fetchall()
 
+    def get_table_comments(self, cursor):
+        cursor.execute(
+            """
+            SELECT
+                n.nspname,
+                c.relname,
+                obj_description(c.oid, 'pg_class')
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relkind = 'r'
+              AND n.nspname NOT IN ('pg_catalog', 'information_schema');
+            """
+        )
+        return cursor.fetchall()
 
-from typing import Any
+    def get_column_comments(self, cursor):
+        cursor.execute(
+            """
+            SELECT
+                n.nspname,
+                c.relname,
+                a.attname,
+                col_description(c.oid, a.attnum)
+            FROM pg_attribute a
+            JOIN pg_class c ON a.attrelid = c.oid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE a.attnum > 0
+              AND NOT a.attisdropped
+              AND c.relkind = 'r'
+              AND n.nspname NOT IN ('pg_catalog', 'information_schema');
+            """
+        )
+        return cursor.fetchall()
+
+    def sample_distinct_values(self, cursor, raw: dict[str, Any]) -> dict[str, dict[str, list[str]]]:
+        pk_cols = {
+            (str(item[1]), str(item[2]))
+            for item in raw.get("primary_keys") or []
+            if len(item) >= 3
+        }
+        samples: dict[str, dict[str, list[str]]] = {}
+        for column in raw.get("columns") or []:
+            if len(column) < 4:
+                continue
+            schema_name, table_name, column_name, data_type = column[:4]
+            if str(schema_name).startswith("pg_"):
+                continue
+            dtype = str(data_type).lower()
+            col_l = str(column_name).lower()
+            if dtype in _SKIP_TYPES:
+                continue
+            if any(part in col_l for part in _SKIP_NAME_PARTS):
+                continue
+            if (str(table_name), str(column_name)) in pk_cols:
+                continue
+            try:
+                table = _safe_ident(str(table_name))
+                col = _safe_ident(str(column_name))
+            except ValueError:
+                continue
+            try:
+                cursor.execute("SET statement_timeout = 3000")
+                cursor.execute(
+                    f'SELECT COUNT(DISTINCT "{col}") FROM "{table}"'
+                )
+                count_row = cursor.fetchone()
+                cardinality = int(count_row[0] or 0) if count_row else 0
+                if cardinality <= 0 or cardinality > 50:
+                    continue
+                cursor.execute("SET statement_timeout = 3000")
+                cursor.execute(
+                    f"""
+                    SELECT "{col}"::text, COUNT(*) AS n
+                    FROM "{table}"
+                    WHERE "{col}" IS NOT NULL
+                    GROUP BY 1
+                    ORDER BY n DESC
+                    LIMIT 20
+                    """
+                )
+                values = [str(row[0]) for row in cursor.fetchall() if row and row[0] is not None]
+                if values:
+                    samples.setdefault(str(table_name), {})[str(column_name)] = values
+            except Exception:
+                try:
+                    cursor.execute("ROLLBACK")
+                except Exception:
+                    pass
+                continue
+        return samples
 
 
 TYPE_MAPPING = {
@@ -214,6 +345,17 @@ def transform_schema_for_llm(
     primary_keys = schema.get("primary_keys", [])
     foreign_keys = schema.get("foreign_keys", [])
     unique_constraints = schema.get("unique_constraints", [])
+    table_comments = {
+        str(item[1]): str(item[2])
+        for item in schema.get("table_comments") or []
+        if len(item) >= 3 and item[2]
+    }
+    column_comments = {
+        (str(item[1]), str(item[2])): str(item[3])
+        for item in schema.get("column_comments") or []
+        if len(item) >= 4 and item[3]
+    }
+    distinct_values = schema.get("distinct_values") or {}
 
     # ---------------------------------------------------------
     # Build table set
@@ -369,7 +511,7 @@ def transform_schema_for_llm(
 
         table_config = semantic_config.get("tables", {}).get(table_name, {})
 
-        description = table_config.get("description")
+        description = table_config.get("description") or table_comments.get(table_name)
 
         output.append(f"TABLE: {table_name}")
 
@@ -377,6 +519,23 @@ def transform_schema_for_llm(
             output.append(f"Description: {description}")
         else:
             output.append("Description: No description available.")
+
+        pk_names = [name for t, name in primary_key_columns if t == table_name]
+        if pk_names:
+            output.append("Grain: one row per " + ", ".join(pk_names))
+        fan_outs = [
+            rel
+            for rel in relationships
+            if rel["target_table"] == table_name
+        ]
+        if fan_outs:
+            output.append(
+                "Fan-out: "
+                + "; ".join(
+                    f"{rel['source_table']}.{rel['source_column']} → many {table_name}"
+                    for rel in fan_outs
+                )
+            )
 
         output.append("")
         output.append("Columns:")
@@ -402,15 +561,20 @@ def transform_schema_for_llm(
 
                 parts.append(f"→ {target_table}.{target_column}")
 
+            comment = column_comments.get((table_name, column["name"]))
+            if comment:
+                parts.append(f"-- {comment}")
+
             output.append("- " + " ".join(parts))
 
-            # Allowed values
             values = (
                 table_config.get("columns", {}).get(column["name"], {}).get("values")
             )
+            if not values:
+                values = (distinct_values.get(table_name) or {}).get(column["name"])
 
             if values:
-                output.append("  Values: " + ", ".join(values))
+                output.append("  Values: " + ", ".join(str(v) for v in values))
 
         output.append("")
 
@@ -462,7 +626,8 @@ def transform_schema_for_llm(
             "Only use tables and columns listed above.",
             "Never invent columns.",
             "Use foreign-key relationships for JOINs.",
-            "Return PostgreSQL SQL only.",
+            "Do not aggregate a one-side column after a 1-to-many join.",
+            "Respect Grain and Fan-out notes when choosing SUM/COUNT.",
         ],
     )
 
@@ -475,14 +640,19 @@ def transform_schema_for_llm(
     return "\n".join(output)
 
 
+def _definition_uses_only_kept_tables(line: str, kept_tables: set[str]) -> bool:
+    mentioned = re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\.", line)
+    if not mentioned:
+        return True
+    return all(name.lower() in kept_tables for name in mentioned)
+
+
 def filter_schema_to_tables(
     schema_text: str,
     allowed_tables: list[str] | set[str],
     allowed_columns: dict[str, list[str]] | None = None,
 ) -> str:
     """Keep only allow-listed tables and columns in LLM schema text."""
-    import re
-
     allowed = {str(name).lower() for name in (allowed_tables or []) if name}
     if not schema_text or not allowed:
         return ""
@@ -509,9 +679,18 @@ def filter_schema_to_tables(
             continue
         if allowed_for_table:
             filtered_lines = []
+            keep_values = False
             for line in table_block.strip().splitlines():
                 match = re.match(r"^- (\w+)\s+", line.strip())
-                if match and match.group(1).lower() not in allowed_for_table:
+                if match:
+                    keep_values = match.group(1).lower() in allowed_for_table
+                    if keep_values:
+                        filtered_lines.append(line)
+                    continue
+                stripped = line.strip()
+                if stripped.lower().startswith("values:"):
+                    if keep_values:
+                        filtered_lines.append(line)
                     continue
                 filtered_lines.append(line)
             result.append("\n".join(filtered_lines).strip())
@@ -556,6 +735,24 @@ def filter_schema_to_tables(
             result.extend(relationships)
             result.append("")
 
+    definitions_match = re.search(
+        r"BUSINESS DEFINITIONS:\s*(.*?)(?=\n\nRULES:|$)",
+        schema_text,
+        re.DOTALL,
+    )
+    if definitions_match:
+        kept_defs = []
+        for line in definitions_match.group(1).splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("-"):
+                continue
+            if _definition_uses_only_kept_tables(stripped, kept_tables):
+                kept_defs.append(stripped)
+        if kept_defs:
+            result.append("BUSINESS DEFINITIONS:")
+            result.extend(kept_defs)
+            result.append("")
+
     result.extend(
         [
             "RULES:",
@@ -565,6 +762,36 @@ def filter_schema_to_tables(
             "- Use foreign-key relationships for JOINs.",
             "- Return PostgreSQL SQL only.",
             "- Treat tables and columns that are not listed as if they do not exist.",
+            "- Do not aggregate a one-side column after a 1-to-many join.",
+            "- Respect Grain and Fan-out notes when choosing SUM/COUNT.",
         ]
     )
     return "\n".join(result).strip()
+
+
+def extract_relationships_from_schema(schema_text: str) -> list[dict[str, str]]:
+    relationships: list[dict[str, str]] = []
+    match = re.search(
+        r"RELATIONSHIPS:\s*(.*?)(?=\n\nBUSINESS DEFINITIONS:|\n\nRULES:|$)",
+        schema_text or "",
+        re.DOTALL,
+    )
+    if not match:
+        return relationships
+    for line in match.group(1).splitlines():
+        line = line.strip()
+        parsed = re.match(
+            r"-\s+(\w+)\.(\w+)\s+→\s+(\w+)\.(\w+)",
+            line,
+        )
+        if not parsed:
+            continue
+        relationships.append(
+            {
+                "source_table": parsed.group(1),
+                "source_column": parsed.group(2),
+                "target_table": parsed.group(3),
+                "target_column": parsed.group(4),
+            }
+        )
+    return relationships

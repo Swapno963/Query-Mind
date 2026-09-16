@@ -261,6 +261,7 @@ class OnboardingView(AuthenticatedWorkspaceMixin, View):
                 "business": request.POST.get("business") or "",
                 "keeps": request.POST.getlist("keeps"),
                 "is_readonly_role": live["is_readonly_role"],
+                "semantic_layer": live.get("semantic_layer") or {},
             },
         )
         workspace.set_password(password)

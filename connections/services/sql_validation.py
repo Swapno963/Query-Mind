@@ -50,6 +50,24 @@ class ReadOnlySQLExecutor:
         self.max_rows = max_rows
         self.fetch_size = fetch_size
 
+    def normalized_sql(self, sql: str) -> str:
+        return self.validate(sql).sql(dialect="postgres")
+
+    def explain(self, sql: str) -> dict[str, Any]:
+        expression = self.validate(sql)
+        safe_sql = expression.sql(dialect="postgres")
+        connection = connections[self.database]
+        with transaction.atomic(using=self.database):
+            with connection.cursor() as cursor:
+                cursor.execute("SET TRANSACTION READ ONLY")
+                cursor.execute(
+                    "SET LOCAL statement_timeout = %s",
+                    [self.statement_timeout_ms],
+                )
+                cursor.execute(f"EXPLAIN (FORMAT JSON) {safe_sql}")
+                row = cursor.fetchone()
+        return {"ok": True, "plan": row[0] if row else None, "sql": safe_sql}
+
     def validate(self, sql: str) -> exp.Expression:
         """
         Parse and validate SQL without executing it.

@@ -1,7 +1,8 @@
 from datetime import timedelta
+import json
+import re
 
 from django.utils import timezone
-import re
 
 from connections.models import DatabaseSchema
 from connections.services.schema_discovery import (
@@ -523,35 +524,24 @@ class SelectedSchema:
             lines = table_block.splitlines()
 
             output = []
-
+            keep_values = False
             for line in lines:
-
-                # Keep TABLE line
-                if line.startswith("TABLE:"):
+                stripped = line.strip()
+                if line.startswith("TABLE:") or stripped.startswith("Description:") or stripped.startswith("Grain:") or stripped.startswith("Fan-out:") or stripped == "Columns:":
                     output.append(line)
                     continue
-
-                # Keep Description
-                if line.startswith("Description:"):
-                    output.append(line)
-                    continue
-
-                # Keep "Columns:"
-                if line.strip() == "Columns:":
-                    output.append(line)
-                    continue
-
-                # Check column
-                match = re.match(
-                    r"^- (\w+)\s+(.+)$",
-                    line.strip(),
-                )
-
+                match = re.match(r"^- (\w+)\s+", stripped)
                 if match:
-                    column_name = match.group(1)
-
-                    if column_name in selected_columns:
+                    keep_values = match.group(1) in selected_columns
+                    if keep_values:
                         output.append(line)
+                    continue
+                if stripped.lower().startswith("values:"):
+                    if keep_values:
+                        output.append(line)
+                    continue
+                if stripped:
+                    output.append(line)
 
             if output:
                 result.extend(output)
@@ -618,14 +608,15 @@ class PromptGenerator:
         question: str,
         schema: any,
         conversation_context: str = "",
+        intent: dict | None = None,
+        examples: list | None = None,
     ) -> str:
-        # schema = self._get_schema()
-        # schema = local_schema
-
         return self._build_prompt(
             question=question,
             conversation_context=conversation_context,
             schema=schema,
+            intent=intent or {},
+            examples=examples or [],
         )
 
     def generate_schema_selection_prompt(
@@ -633,11 +624,13 @@ class PromptGenerator:
         question: str,
         schema: str = "",
         conversation_context: str = "",
+        intent: dict | None = None,
     ) -> str:
         return self._build_schema_selector_prompt(
             question=question,
             conversation_context=conversation_context,
             schema=schema,
+            intent=intent or {},
         )
 
     def _get_schema(self):
@@ -682,16 +675,14 @@ class PromptGenerator:
 
         return schema_data
 
-    def _format_business_definitions(self) -> str:
-        return "- Use only the tables and columns in the provided schema."
-
     def _build_schema_selector_prompt(
         self,
         question: str,
         conversation_context: str,
         schema,
+        intent: dict | None = None,
     ) -> str:
-
+        intent_json = json.dumps(intent or {}, indent=2, default=str)
         return f"""
     You are a database schema selection engine.
 
@@ -706,7 +697,10 @@ class PromptGenerator:
     - values
     - business rules
 
-    The selected schema will be passed to another AI that generates the SQL query.
+    Honor the structured intent when it is valid: include the entity, filter, join, and metric columns.
+
+    STRUCTURED INTENT:
+    {intent_json}
 
     DATABASE SCHEMA:
 
@@ -746,6 +740,7 @@ class PromptGenerator:
     8. If the question can be answered using one table, do not select additional tables.
     9. If the question cannot be answered using the provided schema, return an empty selection.
     10. The current user question has the highest priority over conversation context.
+    11. If intent.grain is order, do not select order_items unless a filter lives on items.
 
     OUTPUT FORMAT:
 
@@ -784,15 +779,27 @@ class PromptGenerator:
         question: str,
         conversation_context: str,
         schema,
+        intent: dict | None = None,
+        examples: list | None = None,
     ) -> str:
-
+        intent_json = json.dumps(intent or {}, indent=2, default=str)
+        example_block = "No examples."
+        if examples:
+            parts = []
+            for item in examples:
+                parts.append(
+                    f"Question: {item.get('question')}\nSQL: {item.get('sql')}"
+                )
+            example_block = "\n\n".join(parts)
         return f"""
     You are a SQL generation engine.
 
     Your task is to convert the user's natural-language question into a valid PostgreSQL SQL query.
 
-    Use ONLY the provided relevant database schema, business definitions,
-    and relevant conversation context.
+    The SQL MUST implement the structured intent. Do not change the grain.
+
+    STRUCTURED INTENT:
+    {intent_json}
 
     RELEVANT DATABASE SCHEMA:
 
@@ -802,6 +809,10 @@ class PromptGenerator:
     BUSINESS DEFINITIONS:
 
     {self._format_business_definitions()}
+
+
+    SIMILAR VERIFIED EXAMPLES:
+    {example_block}
 
 
     RELEVANT CONVERSATION CONTEXT:
@@ -830,6 +841,7 @@ class PromptGenerator:
     - Use table aliases when they improve readability.
     - Only reference columns that are present in the provided schema.
     - Only JOIN tables that are present in the provided schema.
+    - If grain is one row per order, never SUM(orders.total_amount) after joining order_items. Use EXISTS or a subquery instead, or aggregate orders alone.
     - Return only the SQL query.
     - Do not include markdown.
     - Do not include ```sql.
@@ -838,4 +850,4 @@ class PromptGenerator:
     """.strip()
 
     def _format_business_definitions(self) -> str:
-        return "- Use only the tables and columns in the provided schema."
+        return "- Use only the tables and columns in the provided schema. Honor BUSINESS DEFINITIONS in the schema."

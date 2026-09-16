@@ -312,26 +312,28 @@ class ChatService:
             return "Sorry, I couldn't process your request right now. Please try again later."
 
     @staticmethod
-    def ask_on_premise_ai(prompt: str) -> str:
+    def ask_on_premise_ai(
+        prompt: str,
+        *,
+        temperature: float = 0.1,
+        system: str | None = None,
+    ) -> str:
         try:
-            # print("Request came on premis AI, and prompt is :", prompt)
-
             full_response = ""
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
 
-            # Use synchronous HTTP client with streaming
             with httpx.Client(timeout=100.0) as client:
                 with client.stream(
                     "POST",
                     OLLAMA_CHAT_ENDPOINT,
                     json={
                         "model": OLLAMA_MODEL,
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": prompt,
-                            }
-                        ],
+                        "messages": messages,
                         "stream": True,
+                        "options": {"temperature": temperature},
                     },
                 ) as response:
 
@@ -350,7 +352,6 @@ class ChatService:
 
                         except json.JSONDecodeError:
                             continue
-            # print("The full response is : ", full_response)
             return full_response
 
         except Exception as e:

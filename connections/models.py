@@ -42,6 +42,7 @@ class WorkspaceConnection(models.Model):
     industry = models.CharField(max_length=120, blank=True, default="")
     business = models.TextField(blank=True, default="")
     keeps = models.JSONField(default=list, blank=True)
+    semantic_layer = models.JSONField(default=dict, blank=True)
     is_readonly_role = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -69,3 +70,29 @@ class WorkspaceConnection(models.Model):
     @property
     def django_alias(self) -> str:
         return f"workspace_{self.pk}"
+
+
+class VerifiedQueryExample(models.Model):
+    """Successful question/SQL pairs used as few-shot examples."""
+
+    workspace = models.ForeignKey(
+        WorkspaceConnection,
+        on_delete=models.CASCADE,
+        related_name="query_examples",
+        null=True,
+        blank=True,
+    )
+    question = models.TextField()
+    sql = models.TextField()
+    linked_tables = models.JSONField(default=list, blank=True)
+    embedding = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "created_at"]),
+        ]
+
+    def __str__(self):
+        return self.question[:80]

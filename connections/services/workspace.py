@@ -10,7 +10,7 @@ from connections.services.schema_discovery import (
     filter_schema_to_tables,
     transform_schema_for_llm,
 )
-from connections.services.catalog import columns_from_raw_schema
+from connections.services.semantic_layer import merge_semantic_layer
 
 
 SUPERUSER_REFUSAL = (
@@ -150,7 +150,8 @@ def discover_live_schema(
                     "Connected, but QueryMind found no tables to use."
                 )
             readonly = detect_readonly_role(cursor, names)
-        schema_text = transform_schema_for_llm(raw)
+        semantic = merge_semantic_layer(names)
+        schema_text = transform_schema_for_llm(raw, semantic)
         if allowed_tables:
             schema_text = filter_schema_to_tables(
                 schema_text,
@@ -161,6 +162,7 @@ def discover_live_schema(
             "tables": names,
             "columns": discovered_columns,
             "schema_text": schema_text,
+            "semantic_layer": semantic,
             "is_readonly_role": readonly,
         }
     finally:

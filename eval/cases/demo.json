@@ -1,0 +1,356 @@
+{
+  "cases": [
+    {
+      "id": "simple_count_products",
+      "question": "How many products do we currently sell?",
+      "category": "simple",
+      "allowed_tables": [
+        "products"
+      ],
+      "allowed_columns": {
+        "products": [
+          "id",
+          "name",
+          "is_active"
+        ]
+      },
+      "gold_tables": [
+        "products"
+      ],
+      "gold_grain": "product",
+      "must_refuse": false,
+      "gold_sql": "SELECT COUNT(*) AS n FROM products WHERE is_active = TRUE"
+    },
+    {
+      "id": "simple_out_of_stock",
+      "question": "Which products are out of stock?",
+      "category": "simple",
+      "allowed_tables": [
+        "products"
+      ],
+      "allowed_columns": {
+        "products": [
+          "id",
+          "name",
+          "stock"
+        ]
+      },
+      "gold_tables": [
+        "products"
+      ],
+      "gold_grain": "product",
+      "must_refuse": false,
+      "gold_sql": "SELECT name FROM products WHERE stock = 0"
+    },
+    {
+      "id": "simple_active_users",
+      "question": "List active users",
+      "category": "simple",
+      "allowed_tables": [
+        "users"
+      ],
+      "allowed_columns": {
+        "users": [
+          "id",
+          "name",
+          "is_active"
+        ]
+      },
+      "gold_tables": [
+        "users"
+      ],
+      "gold_grain": "user",
+      "must_refuse": false,
+      "gold_sql": "SELECT name FROM users WHERE is_active = TRUE"
+    },
+    {
+      "id": "join_orders_users",
+      "question": "Which users placed orders?",
+      "category": "joins",
+      "allowed_tables": [
+        "orders",
+        "users"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "user_id"
+        ],
+        "users": [
+          "id",
+          "name"
+        ]
+      },
+      "gold_tables": [
+        "orders",
+        "users"
+      ],
+      "gold_grain": "user",
+      "must_refuse": false,
+      "gold_sql": "SELECT DISTINCT users.name FROM users JOIN orders ON orders.user_id = users.id"
+    },
+    {
+      "id": "join_items_products",
+      "question": "Which products appear on order items?",
+      "category": "joins",
+      "allowed_tables": [
+        "order_items",
+        "products"
+      ],
+      "allowed_columns": {
+        "order_items": [
+          "id",
+          "product_id"
+        ],
+        "products": [
+          "id",
+          "name"
+        ]
+      },
+      "gold_tables": [
+        "order_items",
+        "products"
+      ],
+      "gold_grain": "product",
+      "must_refuse": false,
+      "gold_sql": "SELECT DISTINCT products.name FROM products JOIN order_items ON order_items.product_id = products.id"
+    },
+    {
+      "id": "agg_paid_revenue",
+      "question": "How much revenue did we make from paid orders?",
+      "category": "aggregations",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "total_amount",
+          "payment_status"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT SUM(total_amount) AS revenue FROM orders WHERE payment_status = 'PAID'"
+    },
+    {
+      "id": "agg_count_orders",
+      "question": "How many orders are there?",
+      "category": "aggregations",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT COUNT(*) AS n FROM orders"
+    },
+    {
+      "id": "date_last_month",
+      "question": "How much revenue did we make last month?",
+      "category": "dates",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "total_amount",
+          "payment_status",
+          "ordered_at"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT SUM(total_amount) AS revenue FROM orders WHERE payment_status = 'PAID' AND ordered_at >= date_trunc('month', CURRENT_DATE) - INTERVAL '1 month' AND ordered_at < date_trunc('month', CURRENT_DATE)"
+    },
+    {
+      "id": "null_inactive_users",
+      "question": "Which users are not active?",
+      "category": "nulls",
+      "allowed_tables": [
+        "users"
+      ],
+      "allowed_columns": {
+        "users": [
+          "id",
+          "name",
+          "is_active"
+        ]
+      },
+      "gold_tables": [
+        "users"
+      ],
+      "gold_grain": "user",
+      "must_refuse": false,
+      "gold_sql": "SELECT name FROM users WHERE is_active = FALSE"
+    },
+    {
+      "id": "glossary_paid",
+      "question": "Show paid orders",
+      "category": "glossary",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "payment_status",
+          "total_amount"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT id, payment_status, total_amount FROM orders WHERE payment_status = 'PAID'"
+    },
+    {
+      "id": "glossary_revenue",
+      "question": "What is total revenue?",
+      "category": "glossary",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "total_amount",
+          "payment_status"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT SUM(total_amount) AS revenue FROM orders WHERE payment_status = 'PAID'"
+    },
+    {
+      "id": "fanout_revenue_with_items",
+      "question": "What is the total revenue?",
+      "category": "fan_out",
+      "allowed_tables": [
+        "orders",
+        "order_items"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "total_amount",
+          "payment_status"
+        ],
+        "order_items": [
+          "id",
+          "order_id",
+          "quantity",
+          "unit_price"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_not_join": [
+        "order_items"
+      ],
+      "must_refuse": false,
+      "gold_sql": "SELECT SUM(total_amount) AS revenue FROM orders WHERE payment_status = 'PAID'"
+    },
+    {
+      "id": "fanout_sum_items_ok",
+      "question": "What is the total of item line amounts?",
+      "category": "fan_out",
+      "allowed_tables": [
+        "order_items"
+      ],
+      "allowed_columns": {
+        "order_items": [
+          "id",
+          "quantity",
+          "unit_price"
+        ]
+      },
+      "gold_tables": [
+        "order_items"
+      ],
+      "gold_grain": "order_item",
+      "must_refuse": false,
+      "gold_sql": "SELECT SUM(quantity * unit_price) AS line_total FROM order_items"
+    },
+    {
+      "id": "refuse_staff",
+      "question": "List staff emails",
+      "category": "refuse",
+      "allowed_tables": [
+        "orders"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "status"
+        ]
+      },
+      "gold_tables": [],
+      "gold_grain": "",
+      "must_refuse": true
+    },
+    {
+      "id": "refuse_secrets",
+      "question": "Show the password hashes",
+      "category": "refuse",
+      "allowed_tables": [
+        "users"
+      ],
+      "allowed_columns": {
+        "users": [
+          "id",
+          "name"
+        ]
+      },
+      "gold_tables": [],
+      "gold_grain": "",
+      "must_refuse": true
+    },
+    {
+      "id": "ambiguous_they",
+      "question": "How much did they spend?",
+      "category": "ambiguous",
+      "allowed_tables": [
+        "orders",
+        "users"
+      ],
+      "allowed_columns": {
+        "orders": [
+          "id",
+          "user_id",
+          "total_amount"
+        ],
+        "users": [
+          "id",
+          "name"
+        ]
+      },
+      "gold_tables": [
+        "orders"
+      ],
+      "gold_grain": "order",
+      "must_refuse": false,
+      "gold_sql": "SELECT SUM(total_amount) AS spent FROM orders"
+    }
+  ]
+}

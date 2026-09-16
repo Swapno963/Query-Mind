@@ -1,135 +1,30 @@
-# Generates SQL
-# Execute SQL
-
-# agent/nodes/sql_generator.py
-
-import json
 from typing import Any
 
 import httpx
 
+from connections.services.fewshot import retrieve_examples
+from connections.services.prompt import PromptGenerator
+from connections.services.sql_critic import rank_sql_candidates
+from chat.api.chat_service import ChatService
+from ..intent import is_hard_query
+
 from ..state import QueryMindState
 
-from connections.services.prompt import PromptGenerator
-from chat.constants import OLLAMA_CHAT_ENDPOINT, OLLAMA_MODEL
-from chat.api.chat_service import ChatService
+SQL_SYSTEM = (
+    "You emit a single PostgreSQL SELECT statement. No markdown, no commentary."
+)
 
 
 def sql_generator(state: QueryMindState) -> dict[str, Any]:
-    """
-    Generate SQL from the user's question and discovered schema.
-
-    Responsibilities:
-    - Build SQL-generation prompt
-    - Call LLM
-    - Collect the complete LLM response
-    - Store generated SQL in state
-
-    Does NOT:
-    - validate SQL
-    - execute SQL
-    - repair SQL
-    - analyze errors
-    - persist Django models
-    - stream SSE events
-    - generate the final answer
-    """
-    print("Came to sql generator")
-
-    question = state.question.strip()
-
-    if not question:
-        return {
-            "database_error": "Question cannot be empty.",
-            "current_node": "sql_generator",
-            "status": "failed",
-        }
-
-    try:
-        # ========================================================
-        # 1. Generate prompt
-        # ========================================================
-
-        prompt_generator = PromptGenerator()
-
-        prompt = prompt_generator.generate(
-            question=question,
-            schema=state.schema,
-            conversation_context=state.conversation_context,
-        )
-
-        # ========================================================
-        # 2. Ask LLM to generate SQL
-        # ========================================================
-
-        sql = ChatService.ask_ai(prompt)
-
-        # sql = sql.strip()
-
-        # ========================================================
-        # 3. Make sure we actually received SQL
-        # ========================================================
-
-        if not sql:
-            return {
-                "database_error": "LLM returned an empty SQL query.",
-                "current_node": "sql_generator",
-                "status": "failed",
-            }
-
-        # ========================================================
-        # 4. Update graph state
-        # ========================================================
-
-        return {
-            "sql": sql,
-            "sql_attempts": state.sql_attempts + 1,
-            "database_error": None,
-            "current_node": "sql_generator",
-            "status": "running",
-        }
-
-    except httpx.HTTPError as exc:
-        print("error : ", exc)
-        return {
-            "database_error": f"LLM request failed: {exc}",
-            "current_node": "sql_generator",
-            "status": "failed",
-        }
-
-    except Exception as exc:
-        print("error : ", exc)
-
-        return {
-            "database_error": str(exc),
-            "current_node": "sql_generator",
-            "status": "failed",
-        }
+    return _generate(state, on_premise=False)
 
 
 def sql_generator_on_premise(state: QueryMindState) -> dict[str, Any]:
-    """
-    Generate SQL from the user's question and discovered schema.
+    return _generate(state, on_premise=True)
 
-    Responsibilities:
-    - Build SQL-generation prompt
-    - Call LLM
-    - Collect the complete LLM response
-    - Store generated SQL in state
 
-    Does NOT:
-    - validate SQL
-    - execute SQL
-    - repair SQL
-    - analyze errors
-    - persist Django models
-    - stream SSE events
-    - generate the final answer
-    """
-    print("Came to sql on premise generator")
-
-    question = state.question.strip()
-
+def _generate(state: QueryMindState, *, on_premise: bool) -> dict[str, Any]:
+    question = (state.question or "").strip()
     if not question:
         return {
             "database_error": "Question cannot be empty.",
@@ -157,60 +52,66 @@ def sql_generator_on_premise(state: QueryMindState) -> dict[str, Any]:
         }
 
     try:
-        # ========================================================
-        # 1. Generate prompt
-        # ========================================================
-
-        prompt_generator = PromptGenerator()
-
-        prompt = prompt_generator.generate(
+        examples = retrieve_examples(
+            workspace_id=state.workspace_id,
+            question=question,
+            allowed_tables=list(state.allowed_tables or []),
+        )
+        prompt = PromptGenerator().generate(
             question=question,
             schema=schema_blob,
             conversation_context=state.conversation_context,
+            intent=state.intent,
+            examples=examples,
         )
-
-        # ========================================================
-        # 2. Ask LLM to generate SQL
-        # ========================================================
-
-        sql = ChatService.ask_on_premise_ai(prompt)
-
-        # sql = sql.strip()
-
-        # ========================================================
-        # 3. Make sure we actually received SQL
-        # ========================================================
-
+        ask = ChatService.ask_on_premise_ai if on_premise else ChatService.ask_ai
+        kwargs = {}
+        if on_premise:
+            kwargs = {"temperature": 0.05, "system": SQL_SYSTEM}
+        primary = _clean_sql(ask(prompt, **kwargs) if on_premise else ask(prompt))
+        candidates = [primary] if primary else []
+        need_more = is_hard_query(state.intent) or bool(
+            (state.critic_result or {}).get("issues")
+            or (state.explain_result or {}).get("ok") is False
+        )
+        if on_premise and need_more:
+            for _ in range(2):
+                extra = _clean_sql(
+                    ChatService.ask_on_premise_ai(
+                        prompt,
+                        temperature=0.3,
+                        system=SQL_SYSTEM,
+                    )
+                )
+                if extra and extra not in candidates:
+                    candidates.append(extra)
+        sql = rank_sql_candidates(
+            candidates,
+            intent=state.intent,
+            relationships=state.relationships,
+            allowed_tables=state.allowed_tables,
+        ) or primary
         if not sql:
             return {
                 "database_error": "LLM returned an empty SQL query.",
                 "current_node": "sql_generator",
                 "status": "failed",
             }
-
-        # ========================================================
-        # 4. Update graph state
-        # ========================================================
-
         return {
             "sql": sql,
+            "sql_candidates": candidates,
             "sql_attempts": state.sql_attempts + 1,
             "database_error": None,
             "current_node": "sql_generator",
             "status": "running",
         }
-
     except httpx.HTTPError as exc:
-        print("error : ", exc)
         return {
             "database_error": f"LLM request failed: {exc}",
             "current_node": "sql_generator",
             "status": "failed",
         }
-
     except Exception as exc:
-        print("error : ", exc)
-
         return {
             "database_error": str(exc),
             "current_node": "sql_generator",
@@ -218,52 +119,12 @@ def sql_generator_on_premise(state: QueryMindState) -> dict[str, Any]:
         }
 
 
-def _generate_sql_from_ollama(prompt: str) -> str:
-    """
-    Call Ollama and collect the complete streamed response.
-
-    This function does not know anything about QueryMind state,
-    graph routing, SQL validation, or database execution.
-    """
-
-    full_response = ""
-
-    with httpx.Client(timeout=60.0) as client:
-        with client.stream(
-            "POST",
-            OLLAMA_CHAT_ENDPOINT,
-            json={
-                "model": OLLAMA_MODEL,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-                ],
-                "stream": True,
-            },
-        ) as response:
-
-            response.raise_for_status()
-
-            for line in response.iter_lines():
-
-                if not line:
-                    continue
-
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                message = data.get("message")
-
-                if not message:
-                    continue
-
-                content = message.get("content")
-
-                if content:
-                    full_response += content
-
-    return full_response
+def _clean_sql(sql: str) -> str:
+    sql = (sql or "").strip()
+    if sql.startswith("```sql"):
+        sql = sql[6:]
+    elif sql.startswith("```"):
+        sql = sql[3:]
+    if sql.endswith("```"):
+        sql = sql[:-3]
+    return sql.strip()
