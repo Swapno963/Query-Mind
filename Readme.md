@@ -1,81 +1,75 @@
-# Django AI Chat with Ollama and HTMX
+# QueryMind
 
-A real-time streaming chat application built with Django, HTMX, and Server-Sent Events (SSE) to mimic popular LLMs like ChatGPT, Claude, etc. It integrates with local LLMs via Ollama.
+Natural-language-to-SQL: LangGraph plans, grounds against schema, generates SQL, then validates or refuses. SELECT-only, no `SELECT *`, allow-lists, read-only transactions, timeouts. Django + PostgreSQL. Built so the model cannot freely hit the database.
 
-## Features
+**One-pager:** [querymind.pdf](docs/querymind.pdf)
 
-- 🚀 Real-time streaming responses using Server-Sent Events (SSE)
-- 🤖 Local LLM integration via Ollama (Gemma 3:4B)
-- 📝 Markdown support with syntax highlighting
-- 💬 Conversation history and context management
-- 🎨 Clean, responsive UI with HTMX
+---
 
-## Installation
+## What it is
 
-### 1. Install and Configure Ollama
+QueryMind lets a user ask a question in English and get an answer from a connected database. It does **not** dump client business data into its own tables. It stores users, workspaces, connection metadata, schema cache, and query history. Client rows are read at query time, under constraints.
 
-Download and install the [Ollama desktop app](https://ollama.com/) for your platform.
-
-Once installed, pull the Gemma 3:4B model (3.3GB):
-
-```bash
-ollama pull gemma3:4b
+```text
+Question
+  → Schema (inspect, allow-list)
+  → Generate SQL
+  → Validate (parse, filter, fail-closed)
+  → Execute (read-only, timed)  or  Refuse
 ```
 
-Ensure Ollama is running in the background (it runs on `http://localhost:11434` by default).
+The QueryMind database holds the product itself. An optional client database is queried through a read-only path: allowed tables and columns, max rows, statement timeout.
 
-### 2. Set Up with uv
+---
 
-[uv](https://docs.astral.sh/uv/) is a fast Python package manager. Install it if you haven't already:
+## Safety model
 
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+Implemented checks before anything hits a client database:
 
-Then run the project:
+- **SELECT-only** SQL, parsed with sqlglot (PostgreSQL dialect)
+- **No `SELECT *`**
+- Table and column **allow-lists**; unauthorized identifiers fail closed
+- One statement at a time
+- **Read-only transaction** (`SET TRANSACTION READ ONLY`)
+- **Statement timeout**
+- Row cap on streamed results
+- Repair/retry with a cap; otherwise refuse
 
-```bash
-# Install dependencies and run migrations
-uv run python manage.py migrate
+The model proposes SQL. The validator and executor decide whether it runs.
 
-# Create a superuser to access the admin panel
-uv run python manage.py createsuperuser
+---
 
-# Start the development server
-uv run python manage.py runserver
-```
+## Agent workflow
 
-## Usage
+The LangGraph path (see `agent/`):
 
-1. Open your browser and navigate to `http://127.0.0.1:8000/`
-2. Type a message in the input field
-3. Watch as the AI response streams in real-time
-4. Previous conversations are saved and accessible from the homepage and the admin at `http://127.0.0.1:8000/admin/`
+1. Plan the question
+2. Ground against discovered / allow-listed schema
+3. Generate SQL
+4. Validate
+5. Execute, repair, or refuse
+6. Format the result
 
-## Project Structure
+Failed execution goes through error analysis and limited retries. Connection failures and policy violations are refused rather than retried forever.
 
-```
-DjangoForAI/
-├── chat/
-│   ├── models.py          # Conversation and Message models
-│   ├── views.py           # Main view logic using Django CBVs
-│   ├── views_stream.py    # SSE streaming implementation
-│   ├── services.py        # Business logic for Ollama API and conversations
-│   ├── forms.py           # Django forms for message validation
-│   ├── constants.py       # Configuration constants and settings
-│   ├── exceptions.py      # Custom exception classes
-│   ├── urls.py            # URL routing
-│   ├── admin.py           # Django admin configuration
-│   └── migrations/        # Database migrations
-├── templates/
-│   ├── homepage.html      # Landing page with recent chats
-│   └── chat.html          # Chat interface
-├── static/
-│   └── css/
-│       └── chat.css       # Styling for chat interface
-├── DjangoForAI/
-│   ├── settings.py        # Django settings
-│   └── urls.py            # Root URL configuration
-├── manage.py              # Django management script
-└── pyproject.toml         # Python project dependencies for uv
-```
+MCP appears as a dependency and as an optional tool path. The default safety path is schema grounding plus SQL validation, not unrestricted tool calling.
+
+---
+
+## Stack
+
+| Area | Tools |
+| --- | --- |
+| App | Django, Django REST Framework |
+| Agent | LangGraph |
+| SQL safety | sqlglot, allow-lists, read-only tx |
+| Data | PostgreSQL |
+| Packaging | Docker, Nginx, GitHub Actions, Terraform (LangGraph work) |
+
+---
+
+## Status
+
+The LangGraph safety pipeline is most complete on `LangGraph_with_onprimise_and_api`. Some agent files on `main` are still stubs; read that branch for the implemented graph.
+
+This repository is the public engineering record for QueryMind, not a claim that every branch is production-ready.
