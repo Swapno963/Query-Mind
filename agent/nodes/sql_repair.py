@@ -5,6 +5,7 @@ from typing import Any
 
 from chat.api.chat_service import ChatService
 from agent.nodes.sql_generator import _clean_sql
+from connections.services.engines import sql_language_name, sqlglot_dialect
 
 from ..state import QueryMindState
 
@@ -44,13 +45,15 @@ def sql_repair(state: QueryMindState) -> dict[str, Any]:
         intent=state.intent or {},
         critic=state.critic_result or {},
         explain=state.explain_result or {},
+        sql_language=sql_language_name(state.engine),
     )
+    system = f"You emit a single {sql_language_name(state.engine)} SELECT statement. No markdown."
     try:
         repaired_sql = _clean_sql(
             ChatService.ask_on_premise_ai(
                 prompt,
                 temperature=0.2,
-                system="You emit a single PostgreSQL SELECT statement. No markdown.",
+                system=system,
             )
         )
     except Exception as exc:
@@ -66,7 +69,7 @@ def sql_repair(state: QueryMindState) -> dict[str, Any]:
             ChatService.ask_on_premise_ai(
                 prompt,
                 temperature=0.35,
-                system="You emit a single PostgreSQL SELECT statement. No markdown.",
+                system=system,
             )
         )
         if extra:
@@ -78,6 +81,7 @@ def sql_repair(state: QueryMindState) -> dict[str, Any]:
         intent=state.intent,
         relationships=state.relationships,
         allowed_tables=state.allowed_tables,
+        dialect=sqlglot_dialect(state.engine),
     )
     repaired_sql = ranked or repaired_sql
     if not repaired_sql:
@@ -113,6 +117,7 @@ def _build_repair_prompt(
     intent: dict[str, Any],
     critic: dict[str, Any],
     explain: dict[str, Any],
+    sql_language: str = "PostgreSQL",
 ) -> str:
     return f"""
 You are a SQL repair engine.
@@ -145,7 +150,7 @@ ERROR ANALYSIS:
 {json.dumps(error_analysis, indent=2, default=str)}
 
 REPAIR RULES:
-1. Return ONLY the corrected PostgreSQL SQL query.
+1. Return ONLY the corrected {sql_language} SQL query.
 2. Do NOT return Markdown or ```sql.
 3. Only generate a single SELECT.
 4. Use only tables and columns in the schema.

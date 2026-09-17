@@ -1,6 +1,13 @@
 """Shared template context for QueryMind product UI."""
 
 from connections.models import WorkspaceConnection
+from connections.services.engines import ENGINE_CHOICES, display_name
+from chat.organizations import (
+    active_membership,
+    ensure_organization_for_user,
+    is_org_admin,
+    organization_for,
+)
 
 from .constants import (
     AI_AVATAR_TEXT,
@@ -28,6 +35,11 @@ DEFAULT_PROFILE = {
 def workspace_for(user, kind=KIND_CHAT):
     if not user or not user.is_authenticated:
         return None
+    org = organization_for(user)
+    if org:
+        shared = WorkspaceConnection.objects.filter(organization=org, kind=kind).first()
+        if shared:
+            return shared
     return WorkspaceConnection.objects.filter(user=user, kind=kind).first()
 
 
@@ -39,11 +51,20 @@ def get_or_create_workspace(user, kind):
         "db_user": "",
         "password_ciphertext": "",
     }
+    org = organization_for(user) or ensure_organization_for_user(user)
+    shared = WorkspaceConnection.objects.filter(organization=org, kind=kind).first()
+    if shared:
+        return shared
+    if not is_org_admin(user):
+        return None
     workspace, _created = WorkspaceConnection.objects.get_or_create(
         user=user,
         kind=kind,
-        defaults=defaults,
+        defaults={**defaults, "organization": org},
     )
+    if workspace.organization_id is None:
+        workspace.organization = org
+        workspace.save(update_fields=["organization"])
     return workspace
 
 
@@ -102,7 +123,9 @@ def profile_from_workspace(workspace):
     )
     return {
         "source_name": host_label,
-        "database": "PostgreSQL",
+        "database": display_name(getattr(workspace, "engine", None)),
+        "engine": getattr(workspace, "engine", "postgres"),
+        "engine_choices": ENGINE_CHOICES,
         "business": workspace.business or "",
         "industry": workspace.industry or "",
         "keeps": workspace.keeps or [],
@@ -142,6 +165,10 @@ def product_context(request, extra=None):
         "example_questions": EXAMPLE_QUESTIONS,
         "recent_limit": RECENT_CONVERSATIONS_LIMIT,
         "workspace": workspace,
+        "is_org_admin": is_org_admin(user) if user and user.is_authenticated else False,
+        "organization": organization_for(user) if user and user.is_authenticated else None,
+        "membership": active_membership(user) if user and user.is_authenticated else None,
+        "engine_choices": ENGINE_CHOICES,
     }
     if extra:
         context.update(extra)

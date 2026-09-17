@@ -5,14 +5,16 @@ import httpx
 from connections.services.fewshot import retrieve_examples
 from connections.services.prompt import PromptGenerator
 from connections.services.sql_critic import rank_sql_candidates
+from connections.services.engines import sql_language_name, sqlglot_dialect
 from chat.api.chat_service import ChatService
 from ..intent import is_hard_query
 
 from ..state import QueryMindState
 
-SQL_SYSTEM = (
-    "You emit a single PostgreSQL SELECT statement. No markdown, no commentary."
-)
+
+def _sql_system(engine: str) -> str:
+    language = sql_language_name(engine)
+    return f"You emit a single {language} SELECT statement. No markdown, no commentary."
 
 
 def sql_generator(state: QueryMindState) -> dict[str, Any]:
@@ -63,11 +65,13 @@ def _generate(state: QueryMindState, *, on_premise: bool) -> dict[str, Any]:
             conversation_context=state.conversation_context,
             intent=state.intent,
             examples=examples,
+            sql_language=sql_language_name(state.engine),
         )
         ask = ChatService.ask_on_premise_ai if on_premise else ChatService.ask_ai
         kwargs = {}
+        system = _sql_system(state.engine)
         if on_premise:
-            kwargs = {"temperature": 0.05, "system": SQL_SYSTEM}
+            kwargs = {"temperature": 0.05, "system": system}
         primary = _clean_sql(ask(prompt, **kwargs) if on_premise else ask(prompt))
         candidates = [primary] if primary else []
         need_more = is_hard_query(state.intent) or bool(
@@ -80,7 +84,7 @@ def _generate(state: QueryMindState, *, on_premise: bool) -> dict[str, Any]:
                     ChatService.ask_on_premise_ai(
                         prompt,
                         temperature=0.3,
-                        system=SQL_SYSTEM,
+                        system=system,
                     )
                 )
                 if extra and extra not in candidates:
@@ -90,6 +94,7 @@ def _generate(state: QueryMindState, *, on_premise: bool) -> dict[str, Any]:
             intent=state.intent,
             relationships=state.relationships,
             allowed_tables=state.allowed_tables,
+            dialect=sqlglot_dialect(state.engine),
         ) or primary
         if not sql:
             return {

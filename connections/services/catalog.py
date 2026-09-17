@@ -13,6 +13,55 @@ WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
 ORDER BY table_schema, table_name, ordinal_position;
 """.strip()
 
+DISCOVERY_SQL_MYSQL = """
+SELECT
+    table_schema,
+    table_name,
+    column_name,
+    data_type
+FROM information_schema.columns
+WHERE table_schema = DATABASE()
+ORDER BY table_name, ordinal_position;
+""".strip()
+
+DISCOVERY_SQL_ORACLE = """
+SELECT
+    USER AS table_schema,
+    table_name,
+    column_name,
+    data_type
+FROM user_tab_columns
+ORDER BY table_name, column_id
+""".strip()
+
+DISCOVERY_SQL_MSSQL = """
+SELECT
+    TABLE_SCHEMA,
+    TABLE_NAME,
+    COLUMN_NAME,
+    DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;
+""".strip()
+
+
+def discovery_sql_for(engine: str) -> str:
+    from connections.services.engines import (
+        ENGINE_MYSQL,
+        ENGINE_MSSQL,
+        ENGINE_ORACLE,
+        normalize_engine,
+    )
+
+    engine = normalize_engine(engine)
+    if engine == ENGINE_MYSQL:
+        return DISCOVERY_SQL_MYSQL
+    if engine == ENGINE_ORACLE:
+        return DISCOVERY_SQL_ORACLE
+    if engine == ENGINE_MSSQL:
+        return DISCOVERY_SQL_MSSQL
+    return DISCOVERY_SQL
+
 
 def _row_value(row: Any, *keys: str, index: int | None = None) -> str:
     if isinstance(row, dict):
@@ -91,8 +140,11 @@ def intersect_allow_lists(
 def schema_text_from_catalog(
     tables: list[str],
     columns: dict[str, list[str]],
+    engine: str = "postgres",
 ) -> str:
-    lines = ["DATABASE: PostgreSQL", ""]
+    from connections.services.engines import catalog_header, sql_language_name
+
+    lines = [catalog_header(engine), ""]
     for table in tables:
         lines.append(f"TABLE: {table}")
         lines.append("Description: Discovered from your database.")
@@ -108,7 +160,7 @@ def schema_text_from_catalog(
             "",
             "- Only use tables and columns listed above.",
             "- Never invent columns or tables.",
-            "- Return PostgreSQL SQL only.",
+            f"- Return {sql_language_name(engine)} SQL only.",
         ]
     )
     return "\n".join(lines).strip()

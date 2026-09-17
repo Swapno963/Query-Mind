@@ -1,6 +1,13 @@
 from django.contrib import admin
 from django.db.models import Count
-from .models import ApiAccessRequest, ApiKey, Conversation, Message
+from .models import (
+    ApiAccessRequest,
+    ApiKey,
+    Conversation,
+    Message,
+    Organization,
+    OrganizationMembership,
+)
 
 
 @admin.register(Conversation)
@@ -69,4 +76,17 @@ class ApiKeyAdmin(admin.ModelAdmin):
     list_filter = ("revoked_at",)
     search_fields = ("prefix", "user__username", "user__email")
     readonly_fields = ("prefix", "key_hash", "created_at")
+
+
+@admin.register(Organization)
+class OrganizationAdmin(admin.ModelAdmin):
+    list_display = ("name", "created_by", "created_at")
+    search_fields = ("name",)
+
+
+@admin.register(OrganizationMembership)
+class OrganizationMembershipAdmin(admin.ModelAdmin):
+    list_display = ("user", "organization", "role", "is_active", "created_at")
+    list_filter = ("role", "is_active")
+    search_fields = ("user__email", "organization__name")
 

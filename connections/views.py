@@ -16,7 +16,7 @@ class QueryView(APIView):
             return Response(
                 {
                     "success": False,
-                    "error": "Connect PostgreSQL and choose allowed tables and columns first.",
+                    "error": "Connect a database and choose allowed tables and columns first.",
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )

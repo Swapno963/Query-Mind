@@ -1,4 +1,4 @@
-import json
+import secrets
 
 from django.conf import settings
 from django.contrib import messages
@@ -19,6 +19,7 @@ import markdown
 from DjangoForAI.app_mode import resolve_signup_product
 from connections.models import WorkspaceConnection
 from connections.services.catalog import intersect_allow_lists
+from connections.services.engines import normalize_engine
 from connections.services.schema_discovery import filter_schema_to_tables
 from connections.services.workspace import (
     WorkspaceConnectionError,
@@ -26,7 +27,21 @@ from connections.services.workspace import (
 )
 
 from .api_keys import generate_api_key, user_has_approved_api_access
-from .models import ApiAccessRequest, ApiKey, Conversation, Message
+from .models import (
+    ApiAccessRequest,
+    ApiKey,
+    Conversation,
+    Message,
+    OrganizationMembership,
+)
+from .organizations import (
+    create_member,
+    ensure_organization_for_user,
+    is_org_admin,
+    is_org_member_active,
+    organization_for,
+    set_member_active,
+)
 from .services import ConversationService
 from .constants import ERROR_MESSAGES, AI_AVATAR_TEXT
 from .ui import (
@@ -65,8 +80,24 @@ class LoginView(View):
         password = request.POST.get("password") or ""
         user = authenticate(request, username=email, password=password)
         if user is None:
+            existing = User.objects.filter(username=email).first()
+            inactive_membership = (
+                existing
+                and OrganizationMembership.objects.filter(
+                    user=existing, is_active=False
+                ).exists()
+            )
+            if existing and (not existing.is_active or inactive_membership):
+                messages.error(request, "This account has been deactivated.")
+                return render(request, "auth/login.html", status=403)
             messages.error(request, "That email or password did not match.")
             return render(request, "auth/login.html", status=400)
+        if not is_org_member_active(user):
+            membership = OrganizationMembership.objects.filter(user=user).first()
+            if membership and not membership.is_active:
+                messages.error(request, "This account has been deactivated.")
+                return render(request, "auth/login.html", status=403)
+            ensure_organization_for_user(user)
         login(request, user)
         return redirect(settings.LOGIN_REDIRECT_URL)
 
@@ -116,6 +147,7 @@ class RegisterView(View):
             password=password,
             first_name=name[:150],
         )
+        ensure_organization_for_user(user, name=name)
         login(request, user)
         if product == "api":
             return redirect("developers")
@@ -125,14 +157,43 @@ class RegisterView(View):
 class AuthenticatedWorkspaceMixin(LoginRequiredMixin):
     login_url = "login"
 
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            membership = OrganizationMembership.objects.filter(user=request.user).first()
+            if membership and not membership.is_active:
+                messages.error(request, "This account has been deactivated.")
+                return redirect("login")
+            if membership is None:
+                ensure_organization_for_user(request.user)
+        return super().dispatch(request, *args, **kwargs)
 
-class OnboardingDiscoverView(AuthenticatedWorkspaceMixin, View):
+
+class AdminRequiredMixin(AuthenticatedWorkspaceMixin):
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            membership = OrganizationMembership.objects.filter(user=request.user).first()
+            if membership and not membership.is_active:
+                messages.error(request, "This account has been deactivated.")
+                return redirect("login")
+            if membership is None:
+                ensure_organization_for_user(request.user)
+            if not is_org_admin(request.user):
+                messages.error(
+                    request,
+                    "Only an organization administrator can manage this setting.",
+                )
+                return redirect(settings.LOGIN_REDIRECT_URL)
+        return super().dispatch(request, *args, **kwargs)
+
+
+class OnboardingDiscoverView(AdminRequiredMixin, View):
     def post(self, request):
         host = (request.POST.get("db_host") or "").strip()
         port = request.POST.get("db_port") or "5432"
         db_name = (request.POST.get("db_name") or "").strip()
         db_user = (request.POST.get("db_user") or "").strip()
         password = request.POST.get("db_password") or ""
+        engine_raw = request.POST.get("engine") or request.POST.get("database") or "postgres"
         if not all([host, db_name, db_user, password]):
             return JsonResponse(
                 {
@@ -143,9 +204,10 @@ class OnboardingDiscoverView(AuthenticatedWorkspaceMixin, View):
             )
         try:
             port_int = int(port)
-        except (TypeError, ValueError):
+            engine = normalize_engine(engine_raw)
+        except (TypeError, ValueError) as exc:
             return JsonResponse(
-                {"ok": False, "error": "Port must be a number."},
+                {"ok": False, "error": str(exc) if isinstance(exc, ValueError) else "Port must be a number."},
                 status=400,
             )
         try:
@@ -155,6 +217,7 @@ class OnboardingDiscoverView(AuthenticatedWorkspaceMixin, View):
                 db_name=db_name,
                 db_user=db_user,
                 password=password,
+                engine=engine,
             )
         except WorkspaceConnectionError as exc:
             return JsonResponse(
@@ -167,11 +230,12 @@ class OnboardingDiscoverView(AuthenticatedWorkspaceMixin, View):
                 "tables": result["tables"],
                 "columns": result["columns"],
                 "is_readonly_role": result["is_readonly_role"],
+                "engine": result["engine"],
             }
         )
 
 
-class OnboardingView(AuthenticatedWorkspaceMixin, View):
+class OnboardingView(AdminRequiredMixin, View):
     def get(self, request):
         return render(
             request,
@@ -185,6 +249,7 @@ class OnboardingView(AuthenticatedWorkspaceMixin, View):
         db_name = (request.POST.get("db_name") or "").strip()
         db_user = (request.POST.get("db_user") or "").strip()
         password = request.POST.get("db_password") or ""
+        engine_raw = request.POST.get("engine") or request.POST.get("database") or "postgres"
         allowed = request.POST.getlist("allowed_tables")
         column_pairs = request.POST.getlist("allowed_columns")
         requested_columns: dict[str, list[str]] = {}
@@ -196,7 +261,7 @@ class OnboardingView(AuthenticatedWorkspaceMixin, View):
         if not all([host, db_name, db_user, password]):
             messages.error(
                 request,
-                "Connect to PostgreSQL first. QueryMind needs a live database connection.",
+                "Connect to a database first. QueryMind needs a live database connection.",
             )
             return render(
                 request,
@@ -206,12 +271,25 @@ class OnboardingView(AuthenticatedWorkspaceMixin, View):
             )
         try:
             port_int = int(port)
+            engine = normalize_engine(engine_raw)
             live = discover_live_schema(
                 host=host,
                 port=port_int,
                 db_name=db_name,
                 db_user=db_user,
                 password=password,
+                engine=engine,
+            )
+        except (TypeError, ValueError) as exc:
+            messages.error(
+                request,
+                str(exc) if isinstance(exc, ValueError) else "Port must be a number.",
+            )
+            return render(
+                request,
+                "onboarding/wizard.html",
+                product_context(request, {"active_nav": "onboarding"}),
+                status=400,
             )
         except WorkspaceConnectionError as exc:
             messages.error(request, exc.user_message)
@@ -221,7 +299,6 @@ class OnboardingView(AuthenticatedWorkspaceMixin, View):
                 product_context(request, {"active_nav": "onboarding"}),
                 status=400,
             )
-        live_names = set(live["tables"])
         allowed, allowed_columns = intersect_allow_lists(
             requested_tables=allowed,
             requested_columns=requested_columns,
@@ -244,10 +321,13 @@ class OnboardingView(AuthenticatedWorkspaceMixin, View):
             allowed,
             allowed_columns,
         )
+        org = organization_for(request.user)
         workspace, _created = WorkspaceConnection.objects.update_or_create(
             user=request.user,
             kind=KIND_CHAT,
             defaults={
+                "organization": org,
+                "engine": engine,
                 "host": host,
                 "port": port_int,
                 "db_name": db_name,
@@ -338,6 +418,84 @@ class DevelopersView(AuthenticatedWorkspaceMixin, View):
         return redirect("developers")
 
 
+class TeamView(AdminRequiredMixin, View):
+    def get(self, request):
+        org = organization_for(request.user)
+        members = (
+            OrganizationMembership.objects.filter(organization=org)
+            .select_related("user")
+            .order_by("role", "user__email")
+        )
+        activity = Conversation.objects.filter(organization=org).order_by("-updated_at")[:30]
+        return render(
+            request,
+            "team.html",
+            product_context(
+                request,
+                {
+                    "active_nav": "team",
+                    "members": members,
+                    "org_activity": activity,
+                    "new_member_password": request.session.pop("new_member_password", None),
+                    "new_member_email": request.session.pop("new_member_email", None),
+                },
+            ),
+        )
+
+    def post(self, request):
+        action = request.POST.get("action")
+        org = organization_for(request.user)
+        if action == "create":
+            name = (request.POST.get("name") or "").strip()
+            email = (request.POST.get("email") or "").strip().lower()
+            password = request.POST.get("password") or secrets.token_urlsafe(9)
+            if not name or not email:
+                messages.error(request, "Name and email are required.")
+                return redirect("team")
+            try:
+                validate_password(password)
+                create_member(admin=request.user, email=email, name=name, password=password)
+            except ValidationError as exc:
+                messages.error(request, " ".join(exc.messages))
+                return redirect("team")
+            except (PermissionError, ValueError) as exc:
+                messages.error(request, str(exc))
+                return redirect("team")
+            request.session["new_member_password"] = password
+            request.session["new_member_email"] = email
+            messages.success(
+                request,
+                "User created. Share the password now; QueryMind will not show it again.",
+            )
+            return redirect("team")
+        if action in {"deactivate", "activate"}:
+            user_id = request.POST.get("user_id")
+            target = get_object_or_404(User, pk=user_id)
+            try:
+                set_member_active(
+                    admin=request.user,
+                    user=target,
+                    is_active=action == "activate",
+                )
+            except PermissionError as exc:
+                messages.error(request, str(exc))
+                return redirect("team")
+            messages.success(request, "User status updated.")
+            return redirect("team")
+        if action == "approve_api":
+            request_id = request.POST.get("request_id")
+            access = get_object_or_404(
+                ApiAccessRequest,
+                pk=request_id,
+                user__org_memberships__organization=org,
+            )
+            access.status = ApiAccessRequest.STATUS_APPROVED
+            access.save(update_fields=["status", "updated_at"])
+            messages.success(request, "API access approved.")
+            return redirect("team")
+        return redirect("team")
+
+
 class AskView(AuthenticatedWorkspaceMixin, ListView):
     model = Conversation
     template_name = "homepage.html"
@@ -356,11 +514,17 @@ class AskView(AuthenticatedWorkspaceMixin, ListView):
     def post(self, request, *args, **kwargs):
         workspace = workspace_for(request.user, KIND_CHAT)
         if not chat_ready(workspace):
+            if is_org_admin(request.user):
+                messages.error(
+                    request,
+                    "Set up your database connection and allowed tables before asking.",
+                )
+                return redirect("onboarding")
             messages.error(
                 request,
-                "Set up your PostgreSQL connection and allowed tables before asking.",
+                "Your administrator has not connected a database yet.",
             )
-            return redirect("onboarding")
+            return redirect("ask")
 
         message_content = request.POST.get("message", "").strip()
         if not message_content:
@@ -369,6 +533,7 @@ class AskView(AuthenticatedWorkspaceMixin, ListView):
         conversation = Conversation.objects.create(
             user=request.user,
             workspace=workspace,
+            organization=organization_for(request.user),
             title=(
                 message_content[:50] + "..."
                 if len(message_content) > 50

@@ -65,10 +65,14 @@
         </section>
 
         <section class="wizard-step" data-step="3" hidden>
-            <h2>Connect PostgreSQL</h2>
-            <p class="lead">Closed beta supports PostgreSQL only. Use a dedicated read-only role, not a superuser or database owner.</p>
+            <h2>Connect your database</h2>
+            <p class="lead">Use a dedicated read-only role, not a superuser or database owner. Engine support is not identical; Oracle and SQL Server skip EXPLAIN JSON.</p>
             <div class="db-options" id="db-options">
-                <label class="db-option selected"><input type="radio" name="database" value="PostgreSQL" checked> PostgreSQL</label>
+                {% for value, label in engine_choices %}
+                <label class="db-option {% if forloop.first %}selected{% endif %}">
+                    <input type="radio" name="engine" value="{{ value }}" {% if forloop.first %}checked{% endif %} data-default-port="{% if value == 'postgres' %}5432{% elif value == 'mysql' %}3306{% elif value == 'oracle' %}1521{% else %}1433{% endif %}"> {{ label }}
+                </label>
+                {% endfor %}
             </div>
         </section>
 

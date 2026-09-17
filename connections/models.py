@@ -2,6 +2,7 @@ from django.conf import settings
 from django.db import models
 
 from connections.services.crypto import decrypt_secret, encrypt_secret
+from connections.services.engines import ENGINE_CHOICES, ENGINE_POSTGRES
 
 
 class DatabaseSchema(models.Model):
@@ -10,7 +11,7 @@ class DatabaseSchema(models.Model):
 
 
 class WorkspaceConnection(models.Model):
-    """One catalog per product: chat (live Postgres) or API (posted schema)."""
+    """One catalog per product: live database (chat) or posted schema (API)."""
 
     KIND_CHAT = "chat"
     KIND_API = "api"
@@ -24,10 +25,22 @@ class WorkspaceConnection(models.Model):
         on_delete=models.CASCADE,
         related_name="workspaces",
     )
+    organization = models.ForeignKey(
+        "chat.Organization",
+        on_delete=models.CASCADE,
+        related_name="workspaces",
+        null=True,
+        blank=True,
+    )
     kind = models.CharField(
         max_length=16,
         choices=KIND_CHOICES,
         default=KIND_CHAT,
+    )
+    engine = models.CharField(
+        max_length=16,
+        choices=ENGINE_CHOICES,
+        default=ENGINE_POSTGRES,
     )
     host = models.CharField(max_length=255, blank=True, default="")
     port = models.PositiveIntegerField(default=5432)
@@ -52,6 +65,11 @@ class WorkspaceConnection(models.Model):
             models.UniqueConstraint(
                 fields=["user", "kind"],
                 name="unique_workspace_per_user_kind",
+            ),
+            models.UniqueConstraint(
+                fields=["organization", "kind"],
+                condition=models.Q(organization__isnull=False),
+                name="unique_workspace_per_org_kind",
             ),
         ]
 

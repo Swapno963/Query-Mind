@@ -42,6 +42,11 @@ class AuthIsolationTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(User.objects.filter(username="cara@example.com").exists())
+        from chat.models import OrganizationMembership
+
+        cara = User.objects.get(username="cara@example.com")
+        membership = OrganizationMembership.objects.get(user=cara)
+        self.assertEqual(membership.role, OrganizationMembership.ROLE_ADMIN)
 
     def test_login_rejects_bad_password(self):
         response = self.client.post(
@@ -144,6 +149,9 @@ class QueryMindAPITests(TestCase):
         self.session = APIClient()
         self.session.force_login(self.user)
         self.api = APIClient()
+        from chat.organizations import ensure_organization_for_user
+
+        ensure_organization_for_user(self.user)
 
     def _approve_and_mint(self):
         ApiAccessRequest.objects.create(
@@ -451,4 +459,101 @@ class AppModeRoutingTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("developers"))
+
+
+class OrganizationAccessTests(TestCase):
+    def setUp(self):
+        from chat.organizations import create_member, ensure_organization_for_user
+
+        self.password = "CorrectHorseBattery9"
+        self.admin = User.objects.create_user(
+            username="owner@shop.com",
+            email="owner@shop.com",
+            password=self.password,
+            first_name="Owner",
+        )
+        ensure_organization_for_user(self.admin, name="Shop Co")
+        self.member = create_member(
+            admin=self.admin,
+            email="analyst@shop.com",
+            name="Analyst",
+            password=self.password,
+        )
+        self.other = User.objects.create_user(
+            username="other@example.com",
+            email="other@example.com",
+            password=self.password,
+        )
+        ensure_organization_for_user(self.other, name="Other Org")
+        self.client = Client()
+
+    def test_member_cannot_open_team_or_onboarding(self):
+        self.client.force_login(self.member)
+        team = self.client.get(reverse("team"))
+        self.assertEqual(team.status_code, 302)
+        onboard = self.client.get(reverse("onboarding"))
+        self.assertEqual(onboard.status_code, 302)
+
+    def test_admin_creates_user(self):
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            reverse("team"),
+            {
+                "action": "create",
+                "name": "Support",
+                "email": "support@shop.com",
+                "password": self.password,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(User.objects.filter(username="support@shop.com").exists())
+
+    def test_conversations_stay_private_across_org_members(self):
+        hidden = Conversation.objects.create(user=self.admin, title="Admin private")
+        self.client.force_login(self.member)
+        response = self.client.get(reverse("chat", args=[hidden.id]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_deactivated_member_cannot_login(self):
+        from chat.organizations import set_member_active
+
+        set_member_active(admin=self.admin, user=self.member, is_active=False)
+        response = self.client.post(
+            reverse("login"),
+            {"email": "analyst@shop.com", "password": self.password},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_member_api_key_rejected_after_deactivate(self):
+        from chat.api_keys import generate_api_key, lookup_api_key
+        from chat.organizations import set_member_active
+
+        ApiAccessRequest.objects.create(
+            user=self.member,
+            status=ApiAccessRequest.STATUS_APPROVED,
+        )
+        raw, prefix, hashed = generate_api_key()
+        ApiKey.objects.create(user=self.member, prefix=prefix, key_hash=hashed)
+        self.assertIsNotNone(lookup_api_key(raw))
+        set_member_active(admin=self.admin, user=self.member, is_active=False)
+        self.assertIsNone(lookup_api_key(raw))
+
+    def test_shared_workspace_is_visible_to_member(self):
+        from chat.organizations import organization_for
+        from chat.ui import KIND_CHAT, workspace_for
+
+        org = organization_for(self.admin)
+        WorkspaceConnection.objects.create(
+            user=self.admin,
+            organization=org,
+            kind=KIND_CHAT,
+            host="127.0.0.1",
+            db_name="shop",
+            db_user="reader",
+            allowed_tables=["orders"],
+            allowed_columns={"orders": ["id"]},
+        )
+        self.assertEqual(workspace_for(self.member, KIND_CHAT).db_name, "shop")
+        other_ws = workspace_for(self.other, KIND_CHAT)
+        self.assertIsNone(other_ws)
 

@@ -33,7 +33,12 @@
                 <i class="bi bi-code-slash"></i> API
             </a>
             {% endif %}
-            {% if chat_enabled and not data_ready %}
+            {% if is_org_admin %}
+            <a class="nav-link {% if active_nav == 'team' %}active{% endif %}" href="{% url 'team' %}">
+                <i class="bi bi-people"></i> Team
+            </a>
+            {% endif %}
+            {% if chat_enabled and not data_ready and is_org_admin %}
             <a class="nav-link {% if active_nav == 'onboarding' %}active{% endif %}" href="{% url 'onboarding' %}">
                 <i class="bi bi-sliders"></i> Set up your data
             </a>
@@ -61,7 +66,10 @@
             {% if signed_in %}
             <div class="account-link">
                 {{ account_name|default:"Signed in" }}
-                <span>Answers use only tables you allow</span>
+                <span>
+                    {% if is_org_admin %}Administrator{% else %}User{% endif %}
+                    {% if organization %} · {{ organization.name }}{% endif %}
+                </span>
             </div>
             <form method="post" action="{% url 'logout' %}">
                 {% csrf_token %}

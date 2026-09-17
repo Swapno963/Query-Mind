@@ -372,3 +372,38 @@ class EvalMetricsTests(SimpleTestCase):
         )
         scored = score_prediction(case, sql=sql, refused=False, linked_tables=["orders", "order_items"])
         self.assertFalse(scored["fan_out_ok"])
+
+
+class EngineSupportTests(SimpleTestCase):
+    def test_normalize_engine_aliases(self):
+        from connections.services.engines import normalize_engine, sqlglot_dialect
+
+        self.assertEqual(normalize_engine("PostgreSQL"), "postgres")
+        self.assertEqual(normalize_engine("mariadb"), "mysql")
+        self.assertEqual(sqlglot_dialect("mssql"), "tsql")
+        with self.assertRaises(ValueError):
+            normalize_engine("mongodb")
+
+    def test_mysql_select_validates(self):
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders"},
+            allowed_columns={"orders": ["id"]},
+            engine="mysql",
+        )
+        self.assertIsNotNone(executor.validate("SELECT id FROM orders"))
+
+    def test_oracle_and_mssql_select_validate(self):
+        for engine in ("oracle", "mssql"):
+            executor = ReadOnlySQLExecutor(
+                allowed_tables={"orders"},
+                allowed_columns={"orders": ["id"]},
+                engine=engine,
+            )
+            self.assertIsNotNone(executor.validate("SELECT id FROM orders"))
+
+    def test_discovery_sql_varies_by_engine(self):
+        from connections.services.catalog import discovery_sql_for
+
+        self.assertIn("DATABASE()", discovery_sql_for("mysql"))
+        self.assertIn("user_tab_columns", discovery_sql_for("oracle"))
+        self.assertIn("INFORMATION_SCHEMA.COLUMNS", discovery_sql_for("mssql"))

@@ -610,6 +610,7 @@ class PromptGenerator:
         conversation_context: str = "",
         intent: dict | None = None,
         examples: list | None = None,
+        sql_language: str = "PostgreSQL",
     ) -> str:
         return self._build_prompt(
             question=question,
@@ -617,6 +618,7 @@ class PromptGenerator:
             schema=schema,
             intent=intent or {},
             examples=examples or [],
+            sql_language=sql_language,
         )
 
     def generate_schema_selection_prompt(
@@ -781,6 +783,7 @@ class PromptGenerator:
         schema,
         intent: dict | None = None,
         examples: list | None = None,
+        sql_language: str = "PostgreSQL",
     ) -> str:
         intent_json = json.dumps(intent or {}, indent=2, default=str)
         example_block = "No examples."
@@ -794,7 +797,7 @@ class PromptGenerator:
         return f"""
     You are a SQL generation engine.
 
-    Your task is to convert the user's natural-language question into a valid PostgreSQL SQL query.
+    Your task is to convert the user's natural-language question into a valid {sql_language} SQL query.
 
     The SQL MUST implement the structured intent. Do not change the grain.
 
@@ -836,8 +839,8 @@ class PromptGenerator:
     - Do not assume business rules that are not provided.
     - Generate only read-only SELECT queries.
     - Do not generate INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, CREATE, GRANT, REVOKE, or other write/DDL statements.
-    - Generate valid PostgreSQL syntax.
-    - Use appropriate PostgreSQL functions and syntax when necessary.
+    - Generate valid {sql_language} syntax.
+    - Use appropriate {sql_language} functions and syntax when necessary.
     - Use table aliases when they improve readability.
     - Only reference columns that are present in the provided schema.
     - Only JOIN tables that are present in the provided schema.

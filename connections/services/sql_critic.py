@@ -12,11 +12,12 @@ def critique_sql(
     intent: dict[str, Any] | None = None,
     relationships: list[dict[str, str]] | None = None,
     allowed_tables: list[str] | None = None,
+    dialect: str = "postgres",
 ) -> dict[str, Any]:
     issues: list[str] = []
     ir = intent or {}
     try:
-        statements = sqlglot.parse(sql or "", dialect="postgres")
+        statements = sqlglot.parse(sql or "", dialect=dialect)
     except Exception as exc:
         return {"ok": False, "issues": [f"parse_error: {exc}"], "confidence": 0.0}
 
@@ -78,6 +79,7 @@ def rank_sql_candidates(
     intent: dict[str, Any] | None = None,
     relationships: list[dict[str, str]] | None = None,
     allowed_tables: list[str] | None = None,
+    dialect: str = "postgres",
 ) -> str | None:
     scored: list[tuple[int, str]] = []
     for sql in candidates:
@@ -89,6 +91,7 @@ def rank_sql_candidates(
             intent=intent,
             relationships=relationships,
             allowed_tables=allowed_tables,
+            dialect=dialect,
         )
         score = 0
         if result["ok"]:

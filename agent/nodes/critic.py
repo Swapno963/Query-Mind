@@ -3,6 +3,7 @@ from typing import Any
 
 from chat.api.chat_service import ChatService
 from connections.services.sql_critic import critique_sql
+from connections.services.engines import sqlglot_dialect
 from ..intent import is_trivial_intent
 
 from ..state import QueryMindState
@@ -16,6 +17,7 @@ def sql_critic(state: QueryMindState) -> dict[str, Any]:
         intent=intent,
         relationships=state.relationships or [],
         allowed_tables=state.allowed_tables or [],
+        dialect=sqlglot_dialect(state.engine),
     )
     if result.get("ok") and not is_trivial_intent(intent):
         metric = intent.get("metric") or {}

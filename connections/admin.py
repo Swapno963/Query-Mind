@@ -11,8 +11,8 @@ class DatabaseSchemaAdmin(admin.ModelAdmin):
 
 @admin.register(WorkspaceConnection)
 class WorkspaceConnectionAdmin(admin.ModelAdmin):
-    list_display = ("user", "kind", "host", "db_name", "db_user", "is_readonly_role", "updated_at")
-    list_filter = ("kind", "is_readonly_role")
+    list_display = ("user", "organization", "kind", "engine", "host", "db_name", "db_user", "is_readonly_role", "updated_at")
+    list_filter = ("kind", "engine", "is_readonly_role")
     readonly_fields = (
         "password_ciphertext",
         "schema_text",

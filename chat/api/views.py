@@ -21,24 +21,46 @@ from chat.api_keys import generate_api_key, user_has_approved_api_access
 from chat.models import ApiAccessRequest, ApiKey, Conversation, Message
 from chat.permissions import IsApiKeyAuthenticated
 from chat.services import ConversationService
-from chat.ui import KIND_API, api_ready, get_or_create_workspace as create_workspace
+from chat.organizations import is_org_admin
+from chat.ui import KIND_API, api_ready, get_or_create_workspace as create_workspace, workspace_for
 from connections.models import WorkspaceConnection
 from connections.services.catalog import (
-    DISCOVERY_SQL,
     catalog_from_discovery_rows,
+    discovery_sql_for,
     intersect_allow_lists,
     schema_text_from_catalog,
 )
+from connections.services.engines import display_name, normalize_engine
 from connections.services.schema_discovery import filter_schema_to_tables
 
 
-def get_or_create_workspace(user) -> WorkspaceConnection:
+def get_or_create_workspace(user) -> WorkspaceConnection | None:
     return create_workspace(user, KIND_API)
 
 
-def workspace_payload(workspace: WorkspaceConnection) -> dict:
+def require_org_admin(user):
+    if not is_org_admin(user):
+        return api_error(
+            "permission_error",
+            "Only an organization administrator can change this workspace.",
+            403,
+        )
+    return None
+
+
+def workspace_payload(workspace: WorkspaceConnection | None) -> dict:
+    if workspace is None:
+        return {
+            "kind": KIND_API,
+            "ready": False,
+            "discovered_tables": [],
+            "discovered_columns": {},
+            "allowed_tables": [],
+            "allowed_columns": {},
+        }
     return {
         "kind": workspace.kind,
+        "engine": workspace.engine,
         "industry": workspace.industry,
         "business": workspace.business,
         "keeps": workspace.keeps or [],
@@ -108,9 +130,14 @@ class ProfileView(APIView):
     permission_classes = [IsApiKeyAuthenticated]
 
     def put(self, request):
+        denied = require_org_admin(request.user)
+        if denied:
+            return denied
         serializer = ProfileSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         workspace = get_or_create_workspace(request.user)
+        if workspace is None:
+            return api_error("permission_error", "Workspace is not available.", 403)
         workspace.industry = serializer.validated_data.get("industry") or ""
         workspace.business = serializer.validated_data.get("business") or ""
         workspace.keeps = serializer.validated_data.get("keeps") or []
@@ -122,12 +149,17 @@ class DiscoverInstructionsView(APIView):
     permission_classes = [IsApiKeyAuthenticated]
 
     def get(self, request):
+        try:
+            engine = normalize_engine(request.query_params.get("engine") or "postgres")
+        except ValueError as exc:
+            return api_error("invalid_request_error", str(exc), 400)
         return Response(
             {
-                "dialect": "postgres",
-                "sql": DISCOVERY_SQL,
+                "dialect": engine,
+                "engine": engine,
+                "sql": discovery_sql_for(engine),
                 "instructions": (
-                    "Run this read-only SQL on your PostgreSQL database, then POST the rows "
+                    f"Run this read-only SQL on your {display_name(engine)} database, then POST the rows "
                     "to /api/v1/discover."
                 ),
             }
@@ -138,6 +170,9 @@ class DiscoverIngestView(APIView):
     permission_classes = [IsApiKeyAuthenticated]
 
     def post(self, request):
+        denied = require_org_admin(request.user)
+        if denied:
+            return denied
         serializer = DiscoverIngestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         catalog = catalog_from_discovery_rows(serializer.validated_data["rows"])
@@ -147,14 +182,23 @@ class DiscoverIngestView(APIView):
                 "No tables were found in the discovery rows. Each row needs table_name and column_name.",
             )
         workspace = get_or_create_workspace(request.user)
+        if workspace is None:
+            return api_error("permission_error", "Workspace is not available.", 403)
+        engine = request.data.get("engine") or workspace.engine
+        try:
+            workspace.engine = normalize_engine(engine)
+        except ValueError as exc:
+            return api_error("invalid_request_error", str(exc), 400)
         workspace.discovered_tables = catalog["tables"]
         workspace.discovered_columns = catalog["columns"]
         workspace.schema_text = schema_text_from_catalog(
             catalog["tables"],
             catalog["columns"],
+            engine=workspace.engine,
         )
         workspace.save(
             update_fields=[
+                "engine",
                 "discovered_tables",
                 "discovered_columns",
                 "schema_text",
@@ -173,9 +217,17 @@ class AccessAllowListView(APIView):
     permission_classes = [IsApiKeyAuthenticated]
 
     def put(self, request):
+        denied = require_org_admin(request.user)
+        if denied:
+            return denied
         serializer = AccessAllowListSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        workspace = get_or_create_workspace(request.user)
+        workspace = workspace_for(request.user, KIND_API)
+        if workspace is None:
+            return api_error(
+                "invalid_request_error",
+                "Run discovery first and POST the SQL results to /api/v1/discover.",
+            )
         if not workspace.discovered_tables:
             return api_error(
                 "invalid_request_error",
@@ -198,6 +250,7 @@ class AccessAllowListView(APIView):
             workspace.schema_text or schema_text_from_catalog(
                 workspace.discovered_tables,
                 workspace.discovered_columns,
+                engine=workspace.engine,
             ),
             allowed_tables,
             allowed_columns,
@@ -217,12 +270,12 @@ class WorkspaceView(APIView):
     permission_classes = [IsApiKeyAuthenticated]
 
     def get(self, request):
-        workspace = get_or_create_workspace(request.user)
+        workspace = workspace_for(request.user, KIND_API)
         return Response(workspace_payload(workspace))
 
 
 def _run_sql_generation(user, content: str):
-    workspace = get_or_create_workspace(user)
+    workspace = workspace_for(user, KIND_API)
     if not api_ready(workspace):
         return None, api_error(
             "permission_error",
@@ -246,6 +299,7 @@ def _run_sql_generation(user, content: str):
         allowed_tables=list(workspace.allowed_tables or []),
         allowed_columns=dict(workspace.allowed_columns or {}),
         schema_text=workspace.schema_text or "",
+        engine=getattr(workspace, "engine", "postgres"),
     )
     final_state = build_api_query_graph().invoke(state)
     if not isinstance(final_state, dict):
@@ -315,7 +369,7 @@ class MessageResultsView(APIView):
     def post(self, request):
         serializer = MessageResultSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if not api_ready(get_or_create_workspace(request.user)):
+        if not api_ready(workspace_for(request.user, KIND_API)):
             return api_error(
                 "permission_error",
                 "Choose allowed tables and columns before asking.",

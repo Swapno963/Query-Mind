@@ -1,0 +1,79 @@
+{% extends "app_base.html" %}
+
+{% block title %}Team — QueryMind{% endblock %}
+
+{% block workspace %}
+<header class="page-header">
+    <div>
+        <h1 class="page-title">Team</h1>
+        <div class="page-meta">{{ organization.name }} — administrators create users. Conversations stay private to each user.</div>
+    </div>
+</header>
+<div class="page-body">
+    {% if messages %}
+    {% for message in messages %}
+    <p class="alert alert-warning">{{ message }}</p>
+    {% endfor %}
+    {% endif %}
+    {% if new_member_password %}
+    <p class="alert alert-success">
+        Login for {{ new_member_email }}: share this password now.
+        <strong>{{ new_member_password }}</strong>
+    </p>
+    {% endif %}
+    <div class="review-card">
+        <h2>Create a user</h2>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create">
+            <div class="field">
+                <label for="name">Name</label>
+                <input id="name" name="name" required>
+            </div>
+            <div class="field">
+                <label for="email">Email</label>
+                <input id="email" name="email" type="email" required>
+            </div>
+            <div class="field">
+                <label for="password">Password (optional)</label>
+                <input id="password" name="password" type="password" autocomplete="new-password">
+            </div>
+            <button class="btn btn-primary" type="submit">Create user</button>
+        </form>
+    </div>
+    <div class="table-list" style="margin-top:1.5rem;">
+        {% for member in members %}
+        <div class="table-row">
+            <div>
+                <strong>{{ member.user.get_full_name|default:member.user.email }}</strong>
+                <div class="page-meta">{{ member.user.email }} · {{ member.get_role_display }} · {% if member.is_active %}Active{% else %}Deactivated{% endif %}</div>
+            </div>
+            {% if member.role != "admin" %}
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="user_id" value="{{ member.user_id }}">
+                {% if member.is_active %}
+                <input type="hidden" name="action" value="deactivate">
+                <button class="btn btn-secondary" type="submit">Deactivate</button>
+                {% else %}
+                <input type="hidden" name="action" value="activate">
+                <button class="btn btn-secondary" type="submit">Activate</button>
+                {% endif %}
+            </form>
+            {% endif %}
+        </div>
+        {% empty %}
+        <p class="page-meta">No users yet.</p>
+        {% endfor %}
+    </div>
+    <div class="review-card" style="margin-top:1.5rem;">
+        <h2>Organization questions</h2>
+        <p class="page-meta">Administrators can see titles of recent questions. Message content stays with the owner’s chat.</p>
+        {% for conv in org_activity %}
+        <div class="page-meta">{{ conv.updated_at|date:"M j" }} · {{ conv.user }} · {{ conv.title }}</div>
+        {% empty %}
+        <p class="page-meta">No questions yet.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

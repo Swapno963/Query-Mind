@@ -2,6 +2,8 @@ from typing import Any
 
 from connections.services.sql_validation import ReadOnlySQLExecutor
 from chat.api.chat_service import SQLFallbackInterceptor
+from connections.models import WorkspaceConnection
+from connections.services.engines import ENGINE_POSTGRES, normalize_engine
 
 from ..state import QueryMindState
 
@@ -35,9 +37,15 @@ def sql_validator(state: QueryMindState) -> dict[str, Any]:
         )
 
     try:
+        engine = ENGINE_POSTGRES
+        if state.workspace_id:
+            workspace = WorkspaceConnection.objects.filter(pk=state.workspace_id).first()
+            if workspace:
+                engine = normalize_engine(workspace.engine)
         ReadOnlySQLExecutor(
             allowed_tables=allowed,
             allowed_columns=allowed_columns,
+            engine=engine,
         ).validate(sql)
     except PermissionError as exc:
         return _invalid(str(exc), fail_closed=True, kind="unavailable")

@@ -51,9 +51,13 @@
 <div class="page-body">
     <div class="empty-setup">
         <h1>Set up your data first</h1>
-        <p>Chat needs a live PostgreSQL connection and the tables you allow. If you only want the API, QueryMind should never connect to your database.</p>
+        <p>Chat needs a live database connection and the tables you allow. If you only want the API, QueryMind should never connect to your database.</p>
         <p>
+            {% if is_org_admin %}
             <a class="btn btn-primary" href="{% url 'onboarding' %}">Set up chat</a>
+            {% else %}
+            <span class="page-meta">Ask your administrator to connect the organization’s database.</span>
+            {% endif %}
             {% if api_enabled %}
             <a class="btn btn-secondary" href="{% url 'developers' %}">Use the API</a>
             {% endif %}

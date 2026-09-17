@@ -5,6 +5,8 @@ from typing import Any
 
 from django.db import connections
 
+from connections.services.engines import catalog_header
+
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SKIP_TYPES = {
     "integer",
@@ -504,7 +506,7 @@ def transform_schema_for_llm(
 
     output: list[str] = []
 
-    output.append("DATABASE: PostgreSQL")
+    output.append(catalog_header(semantic_config.get("engine")))
     output.append("")
 
     for table_name in table_names:
@@ -664,7 +666,12 @@ def filter_schema_to_tables(
                 str(col).lower() for col in (cols or []) if col
             }
 
-    result = ["DATABASE: PostgreSQL", ""]
+    header = "DATABASE: PostgreSQL"
+    for line in (schema_text or "").splitlines()[:8]:
+        if line.startswith("DATABASE:"):
+            header = line.strip()
+            break
+    result = [header, ""]
     table_pattern = re.compile(
         r"(TABLE:\s+(\w+).*?)(?=\n\nTABLE:|\n\nRELATIONSHIPS:|\n\nBUSINESS DEFINITIONS:|\n\nRULES:|$)",
         re.DOTALL,
@@ -760,7 +767,7 @@ def filter_schema_to_tables(
             "- Only use tables and columns listed above.",
             "- Never invent columns or tables.",
             "- Use foreign-key relationships for JOINs.",
-            "- Return PostgreSQL SQL only.",
+            "- Return SQL only for the database named in DATABASE: above.",
             "- Treat tables and columns that are not listed as if they do not exist.",
             "- Do not aggregate a one-side column after a 1-to-many join.",
             "- Respect Grain and Fan-out notes when choosing SUM/COUNT.",

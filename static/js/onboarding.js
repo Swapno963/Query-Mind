@@ -25,7 +25,8 @@
     }
 
     function selectedDatabase() {
-        return "PostgreSQL";
+        const selected = form.querySelector("input[name=engine]:checked");
+        return selected ? selected.parentElement.textContent.trim() : "PostgreSQL";
     }
 
     function showError(message) {
@@ -112,6 +113,8 @@
         body.set("db_name", form.db_name.value);
         body.set("db_user", form.db_user.value);
         body.set("db_password", form.db_password.value);
+        const engine = form.querySelector("input[name=engine]:checked");
+        if (engine) body.set("engine", engine.value);
         body.set("csrfmiddlewaretoken", csrfToken());
         if (testBtn) {
             testBtn.disabled = true;
@@ -164,6 +167,21 @@
         });
     }
 
+    document.querySelectorAll("input[name=engine]").forEach(function (input) {
+        input.addEventListener("change", function () {
+            document.querySelectorAll(".db-option").forEach(function (el) {
+                el.classList.remove("selected");
+            });
+            input.closest(".db-option").classList.add("selected");
+            const port = document.getElementById("db_port");
+            if (port && input.getAttribute("data-default-port")) {
+                port.value = input.getAttribute("data-default-port");
+            }
+            discoverOk = false;
+            if (success) success.hidden = true;
+        });
+    });
+
     ["db_host", "db_port", "db_name", "db_user", "db_password"].forEach(function (name) {
         const input = form.querySelector("[name=" + name + "]");
         if (input) {
@@ -215,7 +233,7 @@
             return;
         }
         if (!discoverOk || !discovered.length) {
-            alert("Connect to PostgreSQL and discover live tables before asking.");
+            alert("Connect to the database and discover live tables before asking.");
             current = 4;
             showStep();
             return;

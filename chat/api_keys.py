@@ -34,4 +34,10 @@ def lookup_api_key(raw: str) -> ApiKey | None:
         return None
     if not user_has_approved_api_access(key.user):
         return None
+    if not key.user.is_active:
+        return None
+    from chat.organizations import is_org_member_active
+
+    if not is_org_member_active(key.user):
+        return None
     return key

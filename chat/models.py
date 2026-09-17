@@ -51,6 +51,13 @@ class Conversation(models.Model):
         null=True,
         blank=True,
     )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.SET_NULL,
+        related_name="conversations",
+        null=True,
+        blank=True,
+    )
 
     tenant_id = models.BigIntegerField(
         null=True,
@@ -160,3 +167,54 @@ class ApiKey(models.Model):
     @property
     def is_active(self):
         return self.revoked_at is None
+
+
+class Organization(models.Model):
+    """Service-provider account. One admin org owns members and shared catalogs."""
+
+    name = models.CharField(max_length=200)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="created_organizations",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
+class OrganizationMembership(models.Model):
+    ROLE_ADMIN = "admin"
+    ROLE_MEMBER = "member"
+    ROLE_CHOICES = [
+        (ROLE_ADMIN, "Administrator"),
+        (ROLE_MEMBER, "User"),
+    ]
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="memberships",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="org_memberships",
+    )
+    role = models.CharField(max_length=16, choices=ROLE_CHOICES, default=ROLE_MEMBER)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "user"],
+                name="unique_org_membership",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user} ({self.role}) in {self.organization}"

@@ -511,6 +511,7 @@ def build_chat_response(conversation, user_message, result, created):
             ReadOnlySQLExecutor(
                 allowed_tables=allowed,
                 allowed_columns=allowed_columns,
+                engine=getattr(conversation.workspace, "engine", "postgres"),
             ).validate(raw_sql)
         except Exception as exc:
             is_fallback, fallback_reason = True, str(exc)

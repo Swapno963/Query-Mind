@@ -23,6 +23,7 @@ class QueryMindState:
     allowed_tables: list[str] = field(default_factory=list)
     allowed_columns: dict[str, list[str]] = field(default_factory=dict)
     workspace_id: int | None = None
+    engine: str = "postgres"
     semantic_layer: dict[str, Any] = field(default_factory=dict)
     relationships: list[dict[str, str]] = field(default_factory=list)
 

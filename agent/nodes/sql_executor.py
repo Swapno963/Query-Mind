@@ -1,7 +1,7 @@
 from typing import Any
 
 from connections.models import WorkspaceConnection
-from connections.services.workspace import register_workspace_database
+from connections.services.sql_validation import executor_for_workspace
 from connections.services.fewshot import record_success
 
 from ..state import QueryMindState
@@ -59,11 +59,10 @@ def sql_executor(state: QueryMindState) -> dict[str, Any]:
             "status": "failed",
         }
 
-    alias = register_workspace_database(workspace)
-    executor = ReadOnlySQLExecutor(
-        database=alias,
-        allowed_tables=set(allowed),
-        allowed_columns=allowed_columns,
+    executor = executor_for_workspace(
+        workspace,
+        allowed,
+        allowed_columns,
     )
 
     try:

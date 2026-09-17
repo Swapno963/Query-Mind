@@ -1,8 +1,6 @@
 from typing import Any
 
-from connections.services.sql_validation import ReadOnlySQLExecutor
 from connections.models import WorkspaceConnection
-from connections.services.workspace import register_workspace_database
 
 from ..state import QueryMindState
 
@@ -28,11 +26,12 @@ def explain_sql(state: QueryMindState) -> dict[str, Any]:
             "status": "running",
         }
 
-    alias = register_workspace_database(workspace)
-    executor = ReadOnlySQLExecutor(
-        database=alias,
-        allowed_tables=allowed,
-        allowed_columns=allowed_columns,
+    from connections.services.sql_validation import executor_for_workspace
+
+    executor = executor_for_workspace(
+        workspace,
+        allowed,
+        allowed_columns,
     )
     try:
         result = executor.explain(sql)

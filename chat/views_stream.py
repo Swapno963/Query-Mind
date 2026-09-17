@@ -63,6 +63,7 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
             allowed_columns=dict(workspace.allowed_columns or {}),
             schema_text=workspace.schema_text or "",
             conversation_context=conversation_context,
+            engine=workspace.engine,
         )
 
         def generate():

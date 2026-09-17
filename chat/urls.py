@@ -7,6 +7,7 @@ public_urlpatterns = [
     path("", views.LandingView.as_view(), name="landing"),
     path("login/", views.LoginView.as_view(), name="login"),
     path("register/", views.RegisterView.as_view(), name="register"),
+    path("team/", views.TeamView.as_view(), name="team"),
     path(
         "logout/",
         LogoutView.as_view(next_page="landing"),
