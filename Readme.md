@@ -1,14 +1,14 @@
 # QueryMind
 
-Natural-language-to-SQL: LangGraph plans, grounds against schema, generates SQL, then validates or refuses. SELECT-only, no `SELECT *`, allow-lists, read-only transactions, timeouts. Django + PostgreSQL. Built so the model cannot freely hit the database.
+Ask a question in English, get a result from a connected database — or a refusal if the SQL is unsafe.
 
-**One-pager:** [querymind.pdf](docs/querymind.pdf)
+**Status:** personal product. The LangGraph safety pipeline is most complete on `LangGraph_with_onprimise_and_api`. Some agent files on `main` are still stubs.
 
 ---
 
-## What it is
+## What it does
 
-QueryMind lets a user ask a question in English and get an answer from a connected database. It does **not** dump client business data into its own tables. It stores users, workspaces, connection metadata, schema cache, and query history. Client rows are read at query time, under constraints.
+QueryMind does **not** copy client business rows into its own tables. It stores users, workspaces, connection metadata, schema cache, and query history. Client data is read at query time, under constraints.
 
 ```text
 Question
@@ -18,41 +18,18 @@ Question
   → Execute (read-only, timed)  or  Refuse
 ```
 
-The QueryMind database holds the product itself. An optional client database is queried through a read-only path: allowed tables and columns, max rows, statement timeout.
-
 ---
 
-## Safety model
+## What I built
 
-Implemented checks before anything hits a client database:
+- LangGraph workflow: plan, ground against schema, generate SQL, validate, then execute / repair / refuse
+- SQL safety: **SELECT-only**, no `SELECT *`, table/column allow-lists, one statement, **read-only transactions**, statement timeout, row cap
+- Django + PostgreSQL product app (users, connections, history)
+- Docker, Nginx, GitHub Actions, and Terraform on the LangGraph work
 
-- **SELECT-only** SQL, parsed with sqlglot (PostgreSQL dialect)
-- **No `SELECT *`**
-- Table and column **allow-lists**; unauthorized identifiers fail closed
-- One statement at a time
-- **Read-only transaction** (`SET TRANSACTION READ ONLY`)
-- **Statement timeout**
-- Row cap on streamed results
-- Repair/retry with a cap; otherwise refuse
+MCP is in the dependency set and on a dedicated branch. The path that actually runs is the validator and executor, not an unrestricted model calling the database.
 
-The model proposes SQL. The validator and executor decide whether it runs.
-
----
-
-## Agent workflow
-
-The LangGraph path (see `agent/`):
-
-1. Plan the question
-2. Ground against discovered / allow-listed schema
-3. Generate SQL
-4. Validate
-5. Execute, repair, or refuse
-6. Format the result
-
-Failed execution goes through error analysis and limited retries. Connection failures and policy violations are refused rather than retried forever.
-
-MCP appears as a dependency and as an optional tool path. The default safety path is schema grounding plus SQL validation, not unrestricted tool calling.
+**One-pager:** [querymind.pdf](docs/querymind.pdf)
 
 ---
 
@@ -64,12 +41,10 @@ MCP appears as a dependency and as an optional tool path. The default safety pat
 | Agent | LangGraph |
 | SQL safety | sqlglot, allow-lists, read-only tx |
 | Data | PostgreSQL |
-| Packaging | Docker, Nginx, GitHub Actions, Terraform (LangGraph work) |
+| Packaging | Docker, Nginx, GitHub Actions, Terraform |
 
 ---
 
-## Status
+## Run
 
-The LangGraph safety pipeline is most complete on `LangGraph_with_onprimise_and_api`. Some agent files on `main` are still stubs; read that branch for the implemented graph.
-
-This repository is the public engineering record for QueryMind, not a claim that every branch is production-ready.
+See the Django project in this repo. Prefer the `LangGraph_with_onprimise_and_api` branch if you want the implemented graph, not stubs.
