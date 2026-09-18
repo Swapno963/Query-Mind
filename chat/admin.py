@@ -80,7 +80,15 @@ class ApiKeyAdmin(admin.ModelAdmin):
 
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ("name", "created_by", "mcp_server_url", "created_at")
+    list_display = (
+        "name",
+        "product_mode",
+        "llm_backend",
+        "created_by",
+        "mcp_server_url",
+        "created_at",
+    )
+    list_filter = ("product_mode", "llm_backend")
     search_fields = ("name", "mcp_server_url")
 
 

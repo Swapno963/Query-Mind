@@ -157,11 +157,22 @@ def _add_control_nodes(workflow):
 
 
 def build_on_premise_graph():
+    return _build_chat_graph(on_premise=True)
+
+
+def build_online_graph():
+    return _build_chat_graph(on_premise=False)
+
+
+def _build_chat_graph(*, on_premise: bool):
     workflow = StateGraph(QueryMindState)
 
     workflow.add_node("planner", planner)
     workflow.add_node("schema", schema)
-    workflow.add_node("sql_generator", sql_generator_on_premise)
+    workflow.add_node(
+        "sql_generator",
+        sql_generator_on_premise if on_premise else sql_generator,
+    )
     workflow.add_node("sql_validator", sql_validator)
     workflow.add_node("explain_sql", explain_sql)
     workflow.add_node("sql_critic", sql_critic)

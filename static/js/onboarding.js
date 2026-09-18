@@ -12,6 +12,17 @@
     const success = document.getElementById("discover-success");
     const errorBox = document.getElementById("discover-error");
     const testBtn = document.getElementById("test-connection");
+    const finishLabel = form.getAttribute("data-finish-label") || "Continue";
+    const discoverIndex = steps.findIndex(function (step) {
+        return step.getAttribute("data-role") === "discover";
+    });
+    const tablesIndex = steps.findIndex(function (step) {
+        return step.getAttribute("data-role") === "tables";
+    });
+    const reviewIndex = steps.findIndex(function (step) {
+        return step.getAttribute("data-role") === "review";
+    });
+    const needsDiscover = discoverIndex >= 0;
 
     let current = 1;
     let discovered = [];
@@ -38,6 +49,7 @@
     }
 
     function renderTables() {
+        if (!tableList) return;
         tableList.innerHTML = discovered.map(function (table) {
             const cols = discoveredColumns[table.name] || [];
             const columnHtml = cols.map(function (column) {
@@ -67,6 +79,7 @@
     }
 
     function renderReview() {
+        if (!reviewCard) return;
         const industry = (form.querySelector("input[name=industry]:checked") || {}).value || "Not specified";
         const business = (form.business && form.business.value.trim()) || "Not described yet";
         const keeps = Array.from(form.querySelectorAll("input[name=keeps]:checked")).map(function (el) {
@@ -79,11 +92,13 @@
             return allowed.indexOf(name) === -1;
         });
         const columns = selectedColumns();
+        const llm = (form.querySelector("input[name=llm_backend]:checked") || {}).value;
         reviewCard.innerHTML =
+            (llm ? "<p><strong>Chat model:</strong> " + (llm === "online" ? "Online (Gemini)" : "Local (Ollama)") + "</p>" : "") +
             "<p><strong>Work:</strong> " + industry + "</p>" +
             "<p>" + business + "</p>" +
             "<p><strong>Information you keep:</strong> " + (keeps.join(", ") || "Not specified") + "</p>" +
-            "<p><strong>Database:</strong> " + selectedDatabase() + " — " + (form.db_name.value || "") + " on " + (form.db_host.value || "") + "</p>" +
+            "<p><strong>Database:</strong> " + selectedDatabase() + " — " + ((form.db_name && form.db_name.value) || "") + " on " + ((form.db_host && form.db_host.value) || "") + "</p>" +
             "<p><strong>Role:</strong> " + (readonlyRole ? "Read-only" : "Connected (not a confirmed read-only role)") + "</p>" +
             "<p><strong>Allowed tables:</strong> " + (allowed.join(", ") || "None") + "</p>" +
             "<p><strong>Allowed columns:</strong> " + (columns.join(", ") || "None") + "</p>" +
@@ -92,18 +107,15 @@
     }
 
     function showStep() {
-        steps.forEach(function (step) {
-            const n = Number(step.getAttribute("data-step"));
-            step.hidden = n !== current;
+        steps.forEach(function (step, index) {
+            step.hidden = index + 1 !== current;
         });
-        progress.style.width = Math.round((current / steps.length) * 100) + "%";
-        stepLabel.textContent = "Step " + current + " of " + steps.length;
+        if (progress) progress.style.width = Math.round((current / steps.length) * 100) + "%";
+        if (stepLabel) stepLabel.textContent = "Step " + current + " of " + steps.length;
         backBtn.disabled = current === 1;
-        nextBtn.textContent = current === steps.length ? "Ask your data" : "Continue";
-        if (current === 5) {
-            renderTables();
-        }
-        if (current === 6) renderReview();
+        nextBtn.textContent = current === steps.length ? finishLabel : "Continue";
+        if (tablesIndex >= 0 && current === tablesIndex + 1) renderTables();
+        if (reviewIndex >= 0 && current === reviewIndex + 1) renderReview();
     }
 
     function discover() {
@@ -200,7 +212,7 @@
     });
 
     nextBtn.addEventListener("click", function () {
-        if (current === 4) {
+        if (needsDiscover && current === discoverIndex + 1) {
             if (!discoverOk) {
                 discover().then(function (ok) {
                     if (!ok) return;
@@ -210,7 +222,7 @@
                 return;
             }
         }
-        if (current === 5) {
+        if (tablesIndex >= 0 && current === tablesIndex + 1) {
             const allowed = form.querySelectorAll("input[name=allowed_tables]:checked");
             if (!allowed.length) {
                 alert("Choose at least one table QueryMind may use. This is a security boundary.");
@@ -232,9 +244,9 @@
             showStep();
             return;
         }
-        if (!discoverOk || !discovered.length) {
+        if (needsDiscover && (!discoverOk || !discovered.length)) {
             alert("Connect to the database and discover live tables before asking.");
-            current = 4;
+            current = discoverIndex + 1;
             showStep();
             return;
         }

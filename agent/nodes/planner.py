@@ -55,6 +55,7 @@ def planner(state: QueryMindState) -> dict[str, Any]:
                 allowed,
                 allowed_columns,
                 semantic_layer,
+                backend=getattr(state, "llm_backend", "local") or "local",
             )
         except Exception:
             ir = ir or empty_intent()

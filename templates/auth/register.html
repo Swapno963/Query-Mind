@@ -5,7 +5,7 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/public.css' %}">
 {% endblock %}
-{% block body_class %}public-body{% endblock %}
+{% block body_class %}public-body auth-body{% endblock %}
 
 {% block body %}
 <header class="public-nav">
@@ -18,56 +18,57 @@
     </a>
 </header>
 <main class="auth-wrap">
-    <div class="auth-card">
-        <div class="brand public-brand">
-            <div class="brand-mark">QM</div>
-            <div class="brand-name">QueryMind</div>
-        </div>
-        <h1>Create your workspace</h1>
-        {% if chat_enabled and api_enabled %}
-        <p class="lead">Choose chat if QueryMind should connect to PostgreSQL. Choose API if your app will run SQL and QueryMind should never see a database password.</p>
-        {% elif api_enabled %}
-        <p class="lead">Create an account to request API access. Your app will run SQL; QueryMind never needs a database password.</p>
-        {% else %}
-        <p class="lead">Create an account so QueryMind can connect to PostgreSQL and answer questions from the tables you allow.</p>
-        {% endif %}
-        {% if messages %}
-        {% for message in messages %}
-        <p class="alert alert-warning">{{ message }}</p>
-        {% endfor %}
-        {% endif %}
-        <form method="post" action="{% url 'register' %}">
-            {% csrf_token %}
+    <section class="auth-stage">
+        {% include "auth/_visual.html" %}
+        <div class="auth-card">
+            <p class="auth-eyebrow">Get started</p>
+            <h1>Create your workspace</h1>
             {% if chat_enabled and api_enabled %}
-            <div class="field">
-                <label>What do you want to use?</label>
-                <div class="choice-grid" style="margin-top:.4rem;">
-                    <label><input type="radio" name="product" value="chat"{% if product != 'api' %} checked{% endif %}> Chat</label>
-                    <label><input type="radio" name="product" value="api"{% if product == 'api' %} checked{% endif %}> API</label>
-                </div>
-            </div>
+            <p class="lead">Choose chat, API, or both. Chat needs a database connection. API uses an online model and a separate database connection.</p>
+            {% elif api_enabled %}
+            <p class="lead">Create an account to request API access. QueryMind stores the API database credentials so it can reconnect after restart.</p>
             {% else %}
-            <input type="hidden" name="product" value="{{ product }}">
+            <p class="lead">Create an account so QueryMind can connect to PostgreSQL and answer questions from the tables you allow.</p>
             {% endif %}
-            <div class="field">
-                <label for="name">Name</label>
-                <input id="name" name="name" type="text" autocomplete="name" required>
-            </div>
-            <div class="field">
-                <label for="email">Email</label>
-                <input id="email" name="email" type="email" autocomplete="email" required>
-            </div>
-            <div class="field">
-                <label for="password">Password</label>
-                <input id="password" name="password" type="password" autocomplete="new-password" required>
-            </div>
-            <div class="field">
-                <label for="password_confirm">Confirm password</label>
-                <input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required>
-            </div>
-            <button class="btn btn-primary" type="submit">Get started</button>
-        </form>
-        <p class="auth-switch">Already have an account? <a href="{% url 'login' %}">Log in</a></p>
-    </div>
+            {% if messages %}
+            {% for message in messages %}
+            <p class="alert alert-warning">{{ message }}</p>
+            {% endfor %}
+            {% endif %}
+            <form method="post" action="{% url 'register' %}">
+                {% csrf_token %}
+                {% if chat_enabled and api_enabled %}
+                <div class="field">
+                    <label>What do you want to use?</label>
+                    <div class="choice-grid" style="margin-top:.4rem;">
+                        <label><input type="radio" name="product" value="chat"{% if product == 'chat' or not product %} checked{% endif %}> Chat</label>
+                        <label><input type="radio" name="product" value="api"{% if product == 'api' %} checked{% endif %}> API</label>
+                        <label><input type="radio" name="product" value="both"{% if product == 'both' %} checked{% endif %}> Both</label>
+                    </div>
+                </div>
+                {% else %}
+                <input type="hidden" name="product" value="{{ product }}">
+                {% endif %}
+                <div class="field">
+                    <label for="name">Name</label>
+                    <input id="name" name="name" type="text" autocomplete="name" required>
+                </div>
+                <div class="field">
+                    <label for="email">Email</label>
+                    <input id="email" name="email" type="email" autocomplete="email" required>
+                </div>
+                <div class="field">
+                    <label for="password">Password</label>
+                    <input id="password" name="password" type="password" autocomplete="new-password" required>
+                </div>
+                <div class="field">
+                    <label for="password_confirm">Confirm password</label>
+                    <input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required>
+                </div>
+                <button class="btn btn-primary" type="submit">Get started</button>
+            </form>
+            <p class="auth-switch">Already have an account? <a href="{% url 'login' %}">Log in</a></p>
+        </div>
+    </section>
 </main>
 {% endblock %}

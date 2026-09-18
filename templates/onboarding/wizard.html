@@ -10,8 +10,16 @@
             <i class="bi bi-list"></i>
         </button>
         <div>
+            {% if show_product_step %}
+            <h1 class="page-title">Choose what to set up</h1>
+            <div class="page-meta">Chat answers questions in the app. API lets your systems call QueryMind. You can add the other product later.</div>
+            {% elif track == "api" %}
+            <h1 class="page-title">Connect the API database</h1>
+            <div class="page-meta">API uses an online model. Store credentials so QueryMind can reconnect after restart. This is separate from chat.</div>
+            {% else %}
             <h1 class="page-title">Build your Database Knowledge Profile</h1>
             <div class="page-meta">QueryMind answers only after it understands your work and your data access rules.</div>
+            {% endif %}
         </div>
     </div>
     <span class="chip {% if profile.is_readonly_role %}chip-success{% else %}chip-muted{% endif %}">
@@ -23,17 +31,52 @@
     </span>
 </header>
 <div class="page-body">
-    <form class="wizard" id="onboarding-form" method="post" action="{% url 'onboarding' %}">
+    <form class="wizard" id="onboarding-form" method="post" action="{% url 'onboarding' %}?track={{ track }}" data-finish-label="{{ finish_label }}">
         {% csrf_token %}
+        <input type="hidden" name="action" value="{{ setup_action }}">
+        <input type="hidden" name="track" value="{{ track }}">
+        {% if show_product_step %}
+        <input type="hidden" name="change" value="products">
+        {% endif %}
         {% if messages %}
         {% for message in messages %}
         <p class="alert alert-warning">{{ message }}</p>
         {% endfor %}
         {% endif %}
         <div class="progress" aria-hidden="true"><span id="wizard-progress"></span></div>
-        <p class="page-meta" id="wizard-step-label">Step 1 of 6</p>
+        <p class="page-meta" id="wizard-step-label">Step 1</p>
 
-        <section class="wizard-step" data-step="1">
+        {% if show_product_step %}
+        <section class="wizard-step" data-step="1" data-role="product">
+            <h2>What do you want to use?</h2>
+            <p class="lead">You can move from chat to both later. API is always an online model.</p>
+            <div class="choice-grid">
+                {% if "chat" in selectable_products %}
+                <label><input type="radio" name="product" value="chat"{% if org_product_mode == "chat" or not org_product_mode %} checked{% endif %}> Chat</label>
+                {% endif %}
+                {% if "api" in selectable_products %}
+                <label><input type="radio" name="product" value="api"{% if org_product_mode == "api" %} checked{% endif %}> API</label>
+                {% endif %}
+                {% if "both" in selectable_products %}
+                <label><input type="radio" name="product" value="both"{% if org_product_mode == "both" %} checked{% endif %}> Both</label>
+                {% endif %}
+            </div>
+        </section>
+        {% endif %}
+
+        {% if show_llm_step %}
+        <section class="wizard-step" data-role="llm">
+            <h2>Which model should chat use?</h2>
+            <p class="lead">Local runs on your machine with Ollama. Online uses Gemini with the server API key.</p>
+            <div class="choice-grid">
+                <label><input type="radio" name="llm_backend" value="local"{% if org_llm_backend != "online" %} checked{% endif %}> Local (Ollama, qwen2.5:3b)</label>
+                <label><input type="radio" name="llm_backend" value="online"{% if org_llm_backend == "online" %} checked{% endif %}> Online (Gemini)</label>
+            </div>
+        </section>
+        {% endif %}
+
+        {% if show_profile_steps %}
+        <section class="wizard-step" data-role="industry">
             <h2>What does your work involve?</h2>
             <p class="lead">QueryMind adapts to your business, not the other way around.</p>
             <div class="choice-grid" id="industry-chips">
@@ -49,7 +92,7 @@
             </div>
         </section>
 
-        <section class="wizard-step" data-step="2" hidden>
+        <section class="wizard-step" data-role="keeps">
             <h2>What kind of information do you keep?</h2>
             <p class="lead">Select anything that sounds familiar. You can refine this later.</p>
             <div class="choice-grid">
@@ -63,8 +106,10 @@
                 <label><input type="checkbox" name="keeps" value="Menu or recipes"> Menu or recipes</label>
             </div>
         </section>
+        {% endif %}
 
-        <section class="wizard-step" data-step="3" hidden>
+        {% if show_db_steps %}
+        <section class="wizard-step" data-role="engine">
             <h2>Connect your database</h2>
             <p class="lead">Use a dedicated read-only role, not a superuser or database owner. Engine support is not identical; Oracle and SQL Server skip EXPLAIN JSON.</p>
             <div class="db-options" id="db-options">
@@ -76,29 +121,29 @@
             </div>
         </section>
 
-        <section class="wizard-step" data-step="4" hidden>
+        <section class="wizard-step" data-role="discover">
             <h2>Discover your database structure</h2>
             <p class="lead">QueryMind will test the connection and read live table names. It will not continue on a failed connection.</p>
             <div class="discover-box">
                 <div class="field">
                     <label for="db_host">Host</label>
-                    <input id="db_host" name="db_host" value="{{ profile.host|default:'127.0.0.1' }}" required>
+                    <input id="db_host" name="db_host" value="{{ profile.host|default:'127.0.0.1' }}" {% if show_db_steps %}required{% endif %}>
                 </div>
                 <div class="field">
                     <label for="db_port">Port</label>
-                    <input id="db_port" name="db_port" value="5432" required>
+                    <input id="db_port" name="db_port" value="5432" {% if show_db_steps %}required{% endif %}>
                 </div>
                 <div class="field">
                     <label for="db_name">Database name</label>
-                    <input id="db_name" name="db_name" value="{{ profile.db_name|default:'' }}" required>
+                    <input id="db_name" name="db_name" value="{{ profile.db_name|default:'' }}" {% if show_db_steps %}required{% endif %}>
                 </div>
                 <div class="field">
                     <label for="db_user">Username</label>
-                    <input id="db_user" name="db_user" value="{{ profile.db_user|default:'' }}" required>
+                    <input id="db_user" name="db_user" value="{{ profile.db_user|default:'' }}" {% if show_db_steps %}required{% endif %}>
                 </div>
                 <div class="field">
                     <label for="db_password">Password</label>
-                    <input id="db_password" name="db_password" type="password" autocomplete="new-password" required>
+                    <input id="db_password" name="db_password" type="password" autocomplete="new-password" {% if show_db_steps %}required{% endif %}>
                 </div>
                 <button class="btn btn-secondary" type="button" id="test-connection">Test connection and discover tables</button>
                 <p class="alert alert-warning" id="discover-error" hidden></p>
@@ -106,18 +151,19 @@
             </div>
         </section>
 
-        <section class="wizard-step" data-step="5" hidden>
+        <section class="wizard-step" data-role="tables">
             <h2>Control what QueryMind can use</h2>
             <p class="lead">If you turn a table or column off, QueryMind will act as if it does not exist. This is a security boundary, not a preference.</p>
             <div class="table-list" id="table-list"></div>
             <p class="alert alert-warning">Do not skip this step. Choose tables and at least one column on each allowed table.</p>
         </section>
 
-        <section class="wizard-step" data-step="6" hidden>
+        <section class="wizard-step" data-role="review">
             <h2>Database Knowledge Profile</h2>
-            <p class="lead">Review this before you ask questions. You can change access anytime from Your data.</p>
+            <p class="lead">Review this before you continue. You can change access anytime from Your data.</p>
             <div class="review-card" id="review-card"></div>
         </section>
+        {% endif %}
 
         <div class="wizard-nav">
             <button class="btn btn-secondary" type="button" id="wizard-back">Back</button>

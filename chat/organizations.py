@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django.contrib.auth.models import User
 
+from DjangoForAI.app_mode import resolve_signup_product
 from chat.models import Organization, OrganizationMembership
 
 
-def ensure_organization_for_user(user: User, name: str = "") -> Organization:
+def ensure_organization_for_user(
+    user: User,
+    name: str = "",
+    product_mode: str = "",
+    llm_backend: str = "",
+) -> Organization:
     membership = (
         OrganizationMembership.objects.filter(user=user, is_active=True)
         .select_related("organization")
@@ -13,9 +20,19 @@ def ensure_organization_for_user(user: User, name: str = "") -> Organization:
     )
     if membership:
         return membership.organization
+    mode = resolve_signup_product(
+        product_mode,
+        chat=settings.CHAT_ENABLED,
+        api=settings.API_ENABLED,
+    )
+    backend = (llm_backend or "").strip().lower()
+    if backend not in {Organization.LLM_LOCAL, Organization.LLM_ONLINE}:
+        backend = ""
     org = Organization.objects.create(
         name=(name or user.get_full_name() or user.email or user.username)[:200],
         created_by=user,
+        product_mode=mode,
+        llm_backend=backend,
     )
     OrganizationMembership.objects.create(
         organization=org,

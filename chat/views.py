@@ -8,7 +8,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import redirect, get_object_or_404, render
+from django.shortcuts import redirect, get_object_or_404, render, reverse
 from django.template.defaultfilters import linebreaksbr
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
@@ -25,8 +25,21 @@ from connections.services.workspace import (
     WorkspaceConnectionError,
     discover_live_schema,
 )
+from .product import (
+    apply_llm_backend,
+    apply_product_mode,
+    home_url_name,
+    next_setup_step,
+    org_api_enabled,
+    org_chat_enabled,
+)
 
-from .api_keys import generate_api_key, user_has_approved_api_access
+from .api_keys import (
+    generate_api_key,
+    set_org_api_access_status,
+    user_has_approved_api_access,
+)
+from .dashboard import dashboard_context, post_login_redirect_name
 from .models import (
     ApiAccessRequest,
     ApiKey,
@@ -48,9 +61,11 @@ from .constants import ERROR_MESSAGES, AI_AVATAR_TEXT
 from .ui import (
     KIND_API,
     KIND_CHAT,
+    api_db_ready,
     api_ready,
     chat_ready,
     product_context,
+    profile_from_workspace,
     workspace_for,
 )
 
@@ -73,7 +88,7 @@ class LandingView(TemplateView):
 class LoginView(View):
     def get(self, request):
         if request.user.is_authenticated:
-            return redirect(settings.LOGIN_REDIRECT_URL)
+            return redirect(post_login_redirect_name(request.user))
         return render(request, "auth/login.html")
 
     def post(self, request):
@@ -100,13 +115,13 @@ class LoginView(View):
                 return render(request, "auth/login.html", status=403)
             ensure_organization_for_user(user)
         login(request, user)
-        return redirect(settings.LOGIN_REDIRECT_URL)
+        return redirect(post_login_redirect_name(user))
 
 
 class RegisterView(View):
     def get(self, request):
         if request.user.is_authenticated:
-            return redirect(settings.LOGIN_REDIRECT_URL)
+            return redirect(post_login_redirect_name(request.user))
         product = resolve_signup_product(
             request.GET.get("product"),
             chat=settings.CHAT_ENABLED,
@@ -148,11 +163,9 @@ class RegisterView(View):
             password=password,
             first_name=name[:150],
         )
-        ensure_organization_for_user(user, name=name)
+        ensure_organization_for_user(user, name=name, product_mode=product)
         login(request, user)
-        if product == "api":
-            return redirect("developers")
-        return redirect("onboarding")
+        return redirect(_onboarding_next_url(organization_for(user)))
 
 
 class AuthenticatedWorkspaceMixin(LoginRequiredMixin):
@@ -183,8 +196,174 @@ class AdminRequiredMixin(AuthenticatedWorkspaceMixin):
                     request,
                     "Only an organization administrator can manage this setting.",
                 )
-                return redirect(settings.LOGIN_REDIRECT_URL)
+                return redirect(home_url_name(organization_for(request.user)))
         return super().dispatch(request, *args, **kwargs)
+
+
+class OrgChatRequiredMixin:
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            org = organization_for(request.user)
+            if not org_chat_enabled(org):
+                messages.error(request, "This organization does not use chat.")
+                return redirect(home_url_name(org))
+        return super().dispatch(request, *args, **kwargs)
+
+
+class OrgApiRequiredMixin:
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            org = organization_for(request.user)
+            if not org_api_enabled(org):
+                messages.error(request, "This organization does not use the API.")
+                return redirect(home_url_name(org))
+        return super().dispatch(request, *args, **kwargs)
+
+
+def _onboarding_next_url(org):
+    step = next_setup_step(org)
+    if step == "api":
+        return reverse("onboarding") + "?track=api"
+    if step == "chat":
+        return reverse("onboarding") + "?track=chat"
+    if step == "product":
+        return reverse("onboarding") + "?change=products"
+    if org_chat_enabled(org):
+        return reverse("ask")
+    if org_api_enabled(org):
+        return reverse("developers")
+    return reverse("dashboard")
+
+
+def _wizard_plan(request, org):
+    change_products = (request.GET.get("change") or request.POST.get("change") or "") == "products"
+    track = (request.GET.get("track") or request.POST.get("track") or "").strip().lower()
+    step = next_setup_step(org)
+    if change_products or step == "product":
+        return {
+            "wizard_kind": KIND_CHAT,
+            "show_product_step": True,
+            "show_llm_step": False,
+            "show_profile_steps": False,
+            "show_db_steps": False,
+            "track": "product",
+            "finish_label": "Continue",
+            "setup_action": "save_product",
+        }
+    if track not in {"chat", "api"}:
+        track = step or ("api" if org_api_enabled(org) and not org_chat_enabled(org) else "chat")
+    if track == "api":
+        return {
+            "wizard_kind": KIND_API,
+            "show_product_step": False,
+            "show_llm_step": False,
+            "show_profile_steps": False,
+            "show_db_steps": True,
+            "track": "api",
+            "finish_label": "Continue to API",
+            "setup_action": "save_connection",
+        }
+    api_done = (not org_api_enabled(org)) or api_db_ready(workspace_for(request.user, KIND_API))
+    return {
+        "wizard_kind": KIND_CHAT,
+        "show_product_step": False,
+        "show_llm_step": True,
+        "show_profile_steps": True,
+        "show_db_steps": True,
+        "track": "chat",
+        "finish_label": "Ask your data" if api_done else "Continue to API setup",
+        "setup_action": "save_connection",
+    }
+
+
+def _onboarding_context(request, plan, extra=None):
+    kind = plan["wizard_kind"]
+    context = product_context(request, {"active_nav": "onboarding", **plan})
+    workspace = workspace_for(request.user, kind)
+    context["profile"] = profile_from_workspace(workspace)
+    if extra:
+        context.update(extra)
+    return context
+
+
+def _parse_onboarding_connection(request):
+    host = (request.POST.get("db_host") or "").strip()
+    port = request.POST.get("db_port") or "5432"
+    db_name = (request.POST.get("db_name") or "").strip()
+    db_user = (request.POST.get("db_user") or "").strip()
+    password = request.POST.get("db_password") or ""
+    engine_raw = request.POST.get("engine") or request.POST.get("database") or "postgres"
+    allowed = request.POST.getlist("allowed_tables")
+    column_pairs = request.POST.getlist("allowed_columns")
+    requested_columns: dict[str, list[str]] = {}
+    for pair in column_pairs:
+        if "." not in pair:
+            continue
+        table, column = pair.split(".", 1)
+        requested_columns.setdefault(table, []).append(column)
+    return host, port, db_name, db_user, password, engine_raw, allowed, requested_columns
+
+
+def _save_live_workspace(request, *, kind: str):
+    host, port, db_name, db_user, password, engine_raw, allowed, requested_columns = (
+        _parse_onboarding_connection(request)
+    )
+    if not all([host, db_name, db_user, password]):
+        return None, "Connect to a database first. QueryMind needs a live database connection."
+    try:
+        port_int = int(port)
+        engine = normalize_engine(engine_raw)
+        live = discover_live_schema(
+            host=host,
+            port=port_int,
+            db_name=db_name,
+            db_user=db_user,
+            password=password,
+            engine=engine,
+        )
+    except (TypeError, ValueError) as exc:
+        return None, str(exc) if isinstance(exc, ValueError) else "Port must be a number."
+    except WorkspaceConnectionError as exc:
+        return None, exc.user_message
+    allowed, allowed_columns = intersect_allow_lists(
+        requested_tables=allowed,
+        requested_columns=requested_columns,
+        discovered_tables=live["tables"],
+        discovered_columns=live["columns"],
+    )
+    if not allowed:
+        return None, "Choose at least one table and column QueryMind may use. This is a security boundary."
+    schema_text = filter_schema_to_tables(
+        live["schema_text"],
+        allowed,
+        allowed_columns,
+    )
+    org = organization_for(request.user)
+    workspace, _created = WorkspaceConnection.objects.update_or_create(
+        user=request.user,
+        kind=kind,
+        defaults={
+            "organization": org,
+            "engine": engine,
+            "host": host,
+            "port": port_int,
+            "db_name": db_name,
+            "db_user": db_user,
+            "schema_text": schema_text,
+            "discovered_tables": live["tables"],
+            "discovered_columns": live["columns"],
+            "allowed_tables": allowed,
+            "allowed_columns": allowed_columns,
+            "industry": request.POST.get("industry") or "",
+            "business": request.POST.get("business") or "",
+            "keeps": request.POST.getlist("keeps"),
+            "is_readonly_role": live["is_readonly_role"],
+            "semantic_layer": live.get("semantic_layer") or {},
+        },
+    )
+    workspace.set_password(password)
+    workspace.save(update_fields=["password_ciphertext"])
+    return workspace, None
 
 
 class OnboardingDiscoverView(AdminRequiredMixin, View):
@@ -238,119 +417,44 @@ class OnboardingDiscoverView(AdminRequiredMixin, View):
 
 class OnboardingView(AdminRequiredMixin, View):
     def get(self, request):
+        org = organization_for(request.user)
+        plan = _wizard_plan(request, org)
         return render(
             request,
             "onboarding/wizard.html",
-            product_context(request, {"active_nav": "onboarding"}),
+            _onboarding_context(request, plan),
         )
 
     def post(self, request):
-        host = (request.POST.get("db_host") or "").strip()
-        port = request.POST.get("db_port") or "5432"
-        db_name = (request.POST.get("db_name") or "").strip()
-        db_user = (request.POST.get("db_user") or "").strip()
-        password = request.POST.get("db_password") or ""
-        engine_raw = request.POST.get("engine") or request.POST.get("database") or "postgres"
-        allowed = request.POST.getlist("allowed_tables")
-        column_pairs = request.POST.getlist("allowed_columns")
-        requested_columns: dict[str, list[str]] = {}
-        for pair in column_pairs:
-            if "." not in pair:
-                continue
-            table, column = pair.split(".", 1)
-            requested_columns.setdefault(table, []).append(column)
-        if not all([host, db_name, db_user, password]):
-            messages.error(
-                request,
-                "Connect to a database first. QueryMind needs a live database connection.",
-            )
-            return render(
-                request,
-                "onboarding/wizard.html",
-                product_context(request, {"active_nav": "onboarding"}),
-                status=400,
-            )
-        try:
-            port_int = int(port)
-            engine = normalize_engine(engine_raw)
-            live = discover_live_schema(
-                host=host,
-                port=port_int,
-                db_name=db_name,
-                db_user=db_user,
-                password=password,
-                engine=engine,
-            )
-        except (TypeError, ValueError) as exc:
-            messages.error(
-                request,
-                str(exc) if isinstance(exc, ValueError) else "Port must be a number.",
-            )
-            return render(
-                request,
-                "onboarding/wizard.html",
-                product_context(request, {"active_nav": "onboarding"}),
-                status=400,
-            )
-        except WorkspaceConnectionError as exc:
-            messages.error(request, exc.user_message)
-            return render(
-                request,
-                "onboarding/wizard.html",
-                product_context(request, {"active_nav": "onboarding"}),
-                status=400,
-            )
-        allowed, allowed_columns = intersect_allow_lists(
-            requested_tables=allowed,
-            requested_columns=requested_columns,
-            discovered_tables=live["tables"],
-            discovered_columns=live["columns"],
-        )
-        if not allowed:
-            messages.error(
-                request,
-                "Choose at least one table and column QueryMind may use. This is a security boundary.",
-            )
-            return render(
-                request,
-                "onboarding/wizard.html",
-                product_context(request, {"active_nav": "onboarding"}),
-                status=400,
-            )
-        schema_text = filter_schema_to_tables(
-            live["schema_text"],
-            allowed,
-            allowed_columns,
-        )
         org = organization_for(request.user)
-        workspace, _created = WorkspaceConnection.objects.update_or_create(
-            user=request.user,
-            kind=KIND_CHAT,
-            defaults={
-                "organization": org,
-                "engine": engine,
-                "host": host,
-                "port": port_int,
-                "db_name": db_name,
-                "db_user": db_user,
-                "schema_text": schema_text,
-                "discovered_tables": live["tables"],
-                "discovered_columns": live["columns"],
-                "allowed_tables": allowed,
-                "allowed_columns": allowed_columns,
-                "industry": request.POST.get("industry") or "",
-                "business": request.POST.get("business") or "",
-                "keeps": request.POST.getlist("keeps"),
-                "is_readonly_role": live["is_readonly_role"],
-                "semantic_layer": live.get("semantic_layer") or {},
-            },
-        )
-        workspace.set_password(password)
-        workspace.save(update_fields=["password_ciphertext"])
-        return redirect("ask")
+        action = request.POST.get("action") or "save_connection"
+        if action == "save_product":
+            apply_product_mode(org, request.POST.get("product"))
+            org.refresh_from_db()
+            return redirect(_onboarding_next_url(org))
+        plan = _wizard_plan(request, org)
+        kind = KIND_API if plan["track"] == "api" else KIND_CHAT
+        if kind == KIND_CHAT:
+            backend = request.POST.get("llm_backend")
+            if backend:
+                apply_llm_backend(org, backend)
+                org.refresh_from_db()
+        workspace, error = _save_live_workspace(request, kind=kind)
+        if error:
+            messages.error(request, error)
+            return render(
+                request,
+                "onboarding/wizard.html",
+                _onboarding_context(request, plan),
+                status=400,
+            )
+        org.refresh_from_db()
+        if kind == KIND_CHAT:
+            return redirect(_onboarding_next_url(org))
+        return redirect("developers")
 
 
-class DataAccessView(AuthenticatedWorkspaceMixin, View):
+class DataAccessView(AuthenticatedWorkspaceMixin, OrgChatRequiredMixin, View):
     def get(self, request):
         return render(
             request,
@@ -359,13 +463,27 @@ class DataAccessView(AuthenticatedWorkspaceMixin, View):
         )
 
 
-class DevelopersView(AuthenticatedWorkspaceMixin, View):
+class DevelopersView(AuthenticatedWorkspaceMixin, OrgApiRequiredMixin, View):
     def get(self, request):
         latest = request.user.api_access_requests.order_by("-created_at").first()
         approved = user_has_approved_api_access(request.user)
         workspace = workspace_for(request.user, KIND_API)
         origin = request.build_absolute_uri("/").rstrip("/")
-        new_key = request.session.pop("new_api_key", None)
+        pending = request.session.get("pending_api_key") or {}
+        try:
+            pending_id = int(pending.get("key_id") or 0)
+        except (TypeError, ValueError):
+            pending_id = 0
+        revealed = request.session.pop("revealed_api_key", None)
+        api_keys = []
+        for key in request.user.api_keys.filter(revoked_at__isnull=True):
+            api_keys.append(
+                {
+                    "id": key.id,
+                    "masked": f"{key.prefix}••••",
+                    "can_reveal": pending_id == key.id,
+                }
+            )
         return render(
             request,
             "developers.html",
@@ -376,12 +494,8 @@ class DevelopersView(AuthenticatedWorkspaceMixin, View):
                     "api_status": latest.status if latest else "none",
                     "api_approved": approved,
                     "api_ready": api_ready(workspace),
-                    "api_key_prefixes": list(
-                        request.user.api_keys.filter(revoked_at__isnull=True).values_list(
-                            "prefix", flat=True
-                        )
-                    ),
-                    "new_api_key": new_key,
+                    "api_keys": api_keys,
+                    "revealed_api_key": revealed,
                     "api_origin": origin,
                 },
             ),
@@ -410,13 +524,51 @@ class DevelopersView(AuthenticatedWorkspaceMixin, View):
                 )
             else:
                 raw, prefix, hashed = generate_api_key()
-                ApiKey.objects.create(user=request.user, prefix=prefix, key_hash=hashed)
-                request.session["new_api_key"] = raw
+                key = ApiKey.objects.create(
+                    user=request.user, prefix=prefix, key_hash=hashed
+                )
+                request.session["pending_api_key"] = {"key_id": key.id, "raw": raw}
+                request.session.pop("revealed_api_key", None)
                 messages.success(
                     request,
-                    "Store this key now. QueryMind will not show it again.",
+                    "Key created. Enter your password to copy the secret.",
                 )
+        elif action == "reveal_key":
+            self._reveal_key(request)
         return redirect("developers")
+
+    def _reveal_key(self, request):
+        password = request.POST.get("password") or ""
+        try:
+            posted_id = int(request.POST.get("key_id") or 0)
+        except (TypeError, ValueError):
+            posted_id = 0
+        confirmed = authenticate(
+            request, username=request.user.username, password=password
+        )
+        pending = request.session.get("pending_api_key") or {}
+        try:
+            pending_id = int(pending.get("key_id") or 0)
+        except (TypeError, ValueError):
+            pending_id = 0
+        owned = request.user.api_keys.filter(
+            pk=posted_id, revoked_at__isnull=True
+        ).exists()
+        if confirmed is None or confirmed.pk != request.user.pk:
+            messages.error(request, "That password did not match.")
+            return
+        if not owned or pending_id != posted_id or not pending.get("raw"):
+            messages.error(
+                request,
+                "Secret is no longer stored. Create a new key.",
+            )
+            return
+        request.session["revealed_api_key"] = pending["raw"]
+        request.session.pop("pending_api_key", None)
+        messages.success(
+            request,
+            "Copy this key now. QueryMind will not show it again.",
+        )
 
 
 class TeamView(AdminRequiredMixin, View):
@@ -446,6 +598,20 @@ class TeamView(AdminRequiredMixin, View):
     def post(self, request):
         action = request.POST.get("action")
         org = organization_for(request.user)
+        if action == "save_product":
+            apply_product_mode(org, request.POST.get("product"))
+            if request.POST.get("llm_backend") and org_chat_enabled(org):
+                apply_llm_backend(org, request.POST.get("llm_backend"))
+            org.refresh_from_db()
+            messages.success(request, "Product settings saved.")
+            step = next_setup_step(org)
+            if step:
+                return redirect(_onboarding_next_url(org))
+            return redirect("team")
+        if action == "save_llm":
+            apply_llm_backend(org, request.POST.get("llm_backend"))
+            messages.success(request, "Chat model saved.")
+            return redirect("team")
         if action == "save_mcp":
             raw = (request.POST.get("mcp_server_url") or "").strip()
             if raw and not raw.startswith(("http://", "https://")):
@@ -497,19 +663,60 @@ class TeamView(AdminRequiredMixin, View):
             return redirect("team")
         if action == "approve_api":
             request_id = request.POST.get("request_id")
-            access = get_object_or_404(
-                ApiAccessRequest,
-                pk=request_id,
-                user__org_memberships__organization=org,
-            )
-            access.status = ApiAccessRequest.STATUS_APPROVED
-            access.save(update_fields=["status", "updated_at"])
+            try:
+                set_org_api_access_status(
+                    org=org,
+                    request_id=request_id,
+                    status=ApiAccessRequest.STATUS_APPROVED,
+                )
+            except ApiAccessRequest.DoesNotExist:
+                messages.error(request, "That API access request was not found.")
+                return redirect("team")
             messages.success(request, "API access approved.")
             return redirect("team")
         return redirect("team")
 
 
-class AskView(AuthenticatedWorkspaceMixin, ListView):
+class DashboardView(AdminRequiredMixin, View):
+    def get(self, request):
+        return render(request, "dashboard.html", dashboard_context(request))
+
+    def post(self, request):
+        org = organization_for(request.user)
+        action = request.POST.get("action")
+        if action == "save_product":
+            apply_product_mode(org, request.POST.get("product"))
+            if request.POST.get("llm_backend") and org_chat_enabled(org):
+                apply_llm_backend(org, request.POST.get("llm_backend"))
+            org.refresh_from_db()
+            messages.success(request, "Product settings saved.")
+            step = next_setup_step(org)
+            if step:
+                return redirect(_onboarding_next_url(org))
+            return redirect("dashboard")
+        if action == "save_llm":
+            apply_llm_backend(org, request.POST.get("llm_backend"))
+            messages.success(request, "Chat model saved.")
+            return redirect("dashboard")
+        request_id = request.POST.get("request_id")
+        if action == "approve_api":
+            status = ApiAccessRequest.STATUS_APPROVED
+            done = "API access approved."
+        elif action == "deny_api":
+            status = ApiAccessRequest.STATUS_DENIED
+            done = "API access denied."
+        else:
+            return redirect("dashboard")
+        try:
+            set_org_api_access_status(org=org, request_id=request_id, status=status)
+        except ApiAccessRequest.DoesNotExist:
+            messages.error(request, "That API access request was not found.")
+            return redirect("dashboard")
+        messages.success(request, done)
+        return redirect("dashboard")
+
+
+class AskView(AuthenticatedWorkspaceMixin, OrgChatRequiredMixin, ListView):
     model = Conversation
     template_name = "homepage.html"
     context_object_name = "recent_conversations"
@@ -562,7 +769,7 @@ class AskView(AuthenticatedWorkspaceMixin, ListView):
 HomepageView = AskView
 
 
-class ChatView(AuthenticatedWorkspaceMixin, DetailView):
+class ChatView(AuthenticatedWorkspaceMixin, OrgChatRequiredMixin, DetailView):
     model = Conversation
     template_name = "chat.html"
     context_object_name = "conversation"

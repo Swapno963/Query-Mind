@@ -8,6 +8,15 @@ from chat.organizations import (
     is_org_admin,
     organization_for,
 )
+from chat.product import (
+    home_url_name,
+    next_setup_step,
+    org_api_enabled,
+    org_chat_enabled,
+    org_llm_backend,
+    org_product_mode,
+    selectable_products,
+)
 
 from .constants import (
     AI_AVATAR_TEXT,
@@ -68,15 +77,26 @@ def get_or_create_workspace(user, kind):
     return workspace
 
 
-def chat_ready(workspace):
+def live_db_ready(workspace):
     return bool(
         workspace
-        and workspace.kind == KIND_CHAT
         and workspace.host
         and workspace.db_name
         and workspace.allowed_tables
         and workspace.allowed_columns
     )
+
+
+def chat_ready(workspace):
+    return bool(
+        workspace
+        and workspace.kind == KIND_CHAT
+        and live_db_ready(workspace)
+    )
+
+
+def api_db_ready(workspace):
+    return bool(workspace and workspace.kind == KIND_API and live_db_ready(workspace))
 
 
 def api_ready(workspace):
@@ -150,9 +170,17 @@ def product_context(request, extra=None):
         else Conversation.objects.none()
     )
     data_ready = chat_ready(workspace)
+    api_workspace = (
+        workspace_for(user, KIND_API) if user and user.is_authenticated else None
+    )
+    org = organization_for(user) if user and user.is_authenticated else None
+    chat_on = org_chat_enabled(org) if org else False
+    api_on = org_api_enabled(org) if org else False
+    setup_step = next_setup_step(org) if org else None
     context = {
         "recent_conversations": recent,
         "data_ready": data_ready,
+        "api_data_ready": api_db_ready(api_workspace),
         "signed_in": bool(user and user.is_authenticated),
         "account_name": (
             (user.get_full_name() or user.get_username())
@@ -166,9 +194,22 @@ def product_context(request, extra=None):
         "recent_limit": RECENT_CONVERSATIONS_LIMIT,
         "workspace": workspace,
         "is_org_admin": is_org_admin(user) if user and user.is_authenticated else False,
-        "organization": organization_for(user) if user and user.is_authenticated else None,
+        "organization": org,
         "membership": active_membership(user) if user and user.is_authenticated else None,
         "engine_choices": ENGINE_CHOICES,
+        "chat_enabled": chat_on,
+        "api_enabled": api_on,
+        "app_home_url_name": home_url_name(org) if org else "ask",
+        "org_product_mode": org_product_mode(org) if org else "",
+        "org_llm_backend": org_llm_backend(org) if org else "",
+        "selectable_products": selectable_products(),
+        "setup_step": setup_step,
+        "show_setup_nav": bool(
+            user
+            and user.is_authenticated
+            and is_org_admin(user)
+            and setup_step
+        ),
     }
     if extra:
         context.update(extra)

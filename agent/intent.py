@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from chat.api.chat_service import ChatService
+from agent.llm import ask_llm
 
 
 OUTPUT_KINDS = {"scalar", "row_list", "grouped"}
@@ -253,6 +253,7 @@ def llm_intent(
     allowed_tables: list[str],
     allowed_columns: dict[str, list[str]],
     semantic_layer: dict[str, Any] | None = None,
+    backend: str = "local",
 ) -> dict[str, Any]:
     prompt = f"""
 You convert a question into a JSON query intent. Use only this schema.
@@ -274,8 +275,9 @@ output is scalar, row_list, or grouped.
 grain is the row grain (order, order_item, product, user).
 Do not invent tables or columns.
 """.strip()
-    raw = ChatService.ask_on_premise_ai(
+    raw = ask_llm(
         prompt,
+        backend=backend,
         temperature=0.1,
         system="You emit JSON only. Never emit SQL.",
     )

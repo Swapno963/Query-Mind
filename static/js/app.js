@@ -53,4 +53,96 @@
             }
         });
     }
+
+    function escapeHtml(value) {
+        return value
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+    }
+
+    function wrap(cls, text) {
+        return '<span class="' + cls + '">' + escapeHtml(text) + "</span>";
+    }
+
+    function highlightJson(source) {
+        const pattern =
+            /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[{}\[\]:,]/g;
+        let last = 0;
+        let html = "";
+        source.replace(pattern, function (match, stringLit, isKey, keyword, offset) {
+            html += escapeHtml(source.slice(last, offset));
+            last = offset + match.length;
+            if (stringLit) {
+                html += wrap(isKey ? "tok-key" : "tok-str", stringLit);
+                if (isKey) html += wrap("tok-punct", isKey);
+                return match;
+            }
+            if (keyword) {
+                html += wrap("tok-kw", keyword);
+                return match;
+            }
+            if (/^-?\d/.test(match)) {
+                html += wrap("tok-num", match);
+                return match;
+            }
+            html += wrap("tok-punct", match);
+            return match;
+        });
+        html += escapeHtml(source.slice(last));
+        return html;
+    }
+
+    function highlightBash(source) {
+        const pattern =
+            /(#[^\n]*)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(\$[A-Z_][A-Z0-9_]*)|\b(curl)\b|(--[a-zA-Z0-9-]+|-[A-Za-z])|(\\[ \t]*\n)/g;
+        let last = 0;
+        let html = "";
+        source.replace(pattern, function (match, comment, str, variable, cmd, flag, cont, offset) {
+            html += escapeHtml(source.slice(last, offset));
+            last = offset + match.length;
+            if (comment) html += wrap("tok-comment", comment);
+            else if (str) html += wrap("tok-str", str);
+            else if (variable) html += wrap("tok-var", variable);
+            else if (cmd) html += wrap("tok-cmd", cmd);
+            else if (flag) html += wrap("tok-flag", flag);
+            else html += wrap("tok-punct", match);
+            return match;
+        });
+        html += escapeHtml(source.slice(last));
+        return html;
+    }
+
+    document.querySelectorAll("pre.docs-pre[data-lang] code").forEach(function (block) {
+        const lang = block.parentElement.getAttribute("data-lang");
+        const source = block.textContent;
+        if (lang === "json") block.innerHTML = highlightJson(source);
+        else if (lang === "bash") block.innerHTML = highlightBash(source);
+    });
+
+    const tocLinks = Array.prototype.slice.call(document.querySelectorAll(".docs-toc a"));
+    if (tocLinks.length && "IntersectionObserver" in window) {
+        const byId = {};
+        tocLinks.forEach(function (link) {
+            const id = (link.getAttribute("href") || "").replace("#", "");
+            if (id) byId[id] = link;
+        });
+        const observer = new IntersectionObserver(
+            function (entries) {
+                entries.forEach(function (entry) {
+                    if (!entry.isIntersecting) return;
+                    tocLinks.forEach(function (link) {
+                        link.classList.remove("is-active");
+                    });
+                    const link = byId[entry.target.id];
+                    if (link) link.classList.add("is-active");
+                });
+            },
+            { rootMargin: "-20% 0px -70% 0px", threshold: 0 }
+        );
+        Object.keys(byId).forEach(function (id) {
+            const section = document.getElementById(id);
+            if (section) observer.observe(section);
+        });
+    }
 })();

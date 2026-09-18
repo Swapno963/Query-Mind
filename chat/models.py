@@ -172,6 +172,21 @@ class ApiKey(models.Model):
 class Organization(models.Model):
     """Service-provider account. One admin org owns members and shared catalogs."""
 
+    PRODUCT_CHAT = "chat"
+    PRODUCT_API = "api"
+    PRODUCT_BOTH = "both"
+    PRODUCT_CHOICES = [
+        (PRODUCT_CHAT, "Chat"),
+        (PRODUCT_API, "API"),
+        (PRODUCT_BOTH, "Chat and API"),
+    ]
+    LLM_LOCAL = "local"
+    LLM_ONLINE = "online"
+    LLM_CHOICES = [
+        (LLM_LOCAL, "Local"),
+        (LLM_ONLINE, "Online"),
+    ]
+
     name = models.CharField(max_length=200)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -182,6 +197,18 @@ class Organization(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     mcp_server_url = models.URLField(max_length=500, blank=True, default="")
+    product_mode = models.CharField(
+        max_length=16,
+        choices=PRODUCT_CHOICES,
+        blank=True,
+        default="",
+    )
+    llm_backend = models.CharField(
+        max_length=16,
+        choices=LLM_CHOICES,
+        blank=True,
+        default="",
+    )
 
     def __str__(self):
         return self.name

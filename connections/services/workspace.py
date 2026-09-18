@@ -5,7 +5,7 @@ from typing import Any
 import psycopg
 from django.db import connections
 
-from connections.services.catalog import columns_from_raw_schema
+from connections.services.catalog import columns_from_raw_schema, intersect_allow_lists
 from connections.services.engine_discovery import discovery_for
 from connections.services.engines import (
     ENGINE_MSSQL,
@@ -268,6 +268,50 @@ def discover_live_schema(
         }
     finally:
         conn.close()
+
+
+def refresh_workspace_schema(workspace):
+    """Re-read live tables using stored credentials after process restart."""
+    password = workspace.get_password() if workspace else ""
+    if not workspace or not all(
+        [workspace.host, workspace.db_name, workspace.db_user, password]
+    ):
+        return workspace
+    try:
+        live = discover_live_schema(
+            host=workspace.host,
+            port=workspace.port,
+            db_name=workspace.db_name,
+            db_user=workspace.db_user,
+            password=password,
+            engine=getattr(workspace, "engine", ENGINE_POSTGRES),
+        )
+    except WorkspaceConnectionError:
+        return workspace
+    allowed, allowed_columns = intersect_allow_lists(
+        requested_tables=list(workspace.allowed_tables or []),
+        requested_columns=dict(workspace.allowed_columns or {}),
+        discovered_tables=live["tables"],
+        discovered_columns=live["columns"],
+    )
+    workspace.discovered_tables = live["tables"]
+    workspace.discovered_columns = live["columns"]
+    workspace.is_readonly_role = live["is_readonly_role"]
+    workspace.engine = live["engine"]
+    if allowed:
+        workspace.allowed_tables = allowed
+        workspace.allowed_columns = allowed_columns
+        workspace.schema_text = filter_schema_to_tables(
+            live["schema_text"],
+            allowed,
+            allowed_columns,
+        )
+    else:
+        workspace.schema_text = live["schema_text"]
+    semantic = live.get("semantic_layer") or workspace.semantic_layer or {}
+    workspace.semantic_layer = semantic
+    workspace.save()
+    return workspace
 
 
 def register_workspace_database(workspace) -> str:

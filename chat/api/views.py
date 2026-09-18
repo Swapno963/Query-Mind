@@ -21,7 +21,8 @@ from chat.api_keys import generate_api_key, user_has_approved_api_access
 from chat.models import ApiAccessRequest, ApiKey, Conversation, Message
 from chat.permissions import IsApiKeyAuthenticated
 from chat.services import ConversationService
-from chat.organizations import is_org_admin, mcp_server_url_for
+from chat.organizations import is_org_admin, mcp_server_url_for, organization_for
+from chat.product import org_api_enabled
 from chat.ui import KIND_API, api_ready, get_or_create_workspace as create_workspace, workspace_for
 from connections.models import WorkspaceConnection
 from connections.services.catalog import (
@@ -32,6 +33,17 @@ from connections.services.catalog import (
 )
 from connections.services.engines import display_name, normalize_engine
 from connections.services.schema_discovery import filter_schema_to_tables
+from connections.services.workspace import refresh_workspace_schema
+
+
+def require_org_api(user):
+    if not org_api_enabled(organization_for(user)):
+        return api_error(
+            "permission_error",
+            "This organization does not use the API.",
+            403,
+        )
+    return None
 
 
 def get_or_create_workspace(user) -> WorkspaceConnection | None:
@@ -85,6 +97,9 @@ class AccessRequestView(APIView):
         )
 
     def post(self, request):
+        blocked = require_org_api(request.user)
+        if blocked:
+            return blocked
         serializer = AccessRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         if user_has_approved_api_access(request.user):
@@ -108,6 +123,9 @@ class ApiKeyCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        blocked = require_org_api(request.user)
+        if blocked:
+            return blocked
         if not user_has_approved_api_access(request.user):
             return api_error(
                 "permission_error",
@@ -271,6 +289,8 @@ class WorkspaceView(APIView):
 
     def get(self, request):
         workspace = workspace_for(request.user, KIND_API)
+        if workspace:
+            workspace = refresh_workspace_schema(workspace)
         return Response(workspace_payload(workspace))
 
 
@@ -302,6 +322,7 @@ def _run_sql_generation(user, content: str):
         schema_text=(workspace.schema_text if workspace else "") or "",
         engine=getattr(workspace, "engine", "postgres") if workspace else "postgres",
         mcp_server_url=mcp_url,
+        llm_backend="online",
     )
     final_state = build_api_query_graph().invoke(state)
     if not isinstance(final_state, dict):

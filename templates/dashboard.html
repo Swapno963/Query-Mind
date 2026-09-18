@@ -1,0 +1,161 @@
+{% extends "app_base.html" %}
+
+{% block title %}Dashboard — QueryMind{% endblock %}
+
+{% block workspace %}
+<header class="page-header">
+    <div style="display:flex;align-items:center;gap:.75rem;">
+        <button class="mobile-menu-btn" type="button" data-sidebar-open aria-label="Open menu">
+            <i class="bi bi-list"></i>
+        </button>
+        <div>
+            <h1 class="page-title">Administrator dashboard</h1>
+            <div class="page-meta">
+                {{ dash_org.name }} — overview of this organization and everything you can manage.
+            </div>
+        </div>
+    </div>
+    <div class="header-chips">
+        <span class="chip">Administrator</span>
+        {% if dash_readonly %}
+        <span class="chip chip-success"><i class="bi bi-shield-check"></i> Read-only database</span>
+        {% endif %}
+    </div>
+</header>
+<div class="page-body dash-body">
+    {% if messages %}
+    {% for message in messages %}
+    <p class="alert {% if 'success' in message.tags %}alert-success{% elif 'error' in message.tags %}alert-danger{% else %}alert-warning{% endif %}">{{ message }}</p>
+    {% endfor %}
+    {% endif %}
+
+    {% for alert in dash_alerts %}
+    <div class="dash-alert">
+        <div>
+            <strong>{{ alert.title }}</strong>
+            <p>{{ alert.body }}</p>
+        </div>
+        <a class="btn btn-primary" href="{% url alert.href %}{% if alert.query %}?{{ alert.query }}{% endif %}{% if alert.anchor %}#{{ alert.anchor }}{% endif %}">{{ alert.label }}</a>
+    </div>
+    {% endfor %}
+
+    {% if selectable_products|length > 1 %}
+    <section class="review-card">
+        <h2>Products and chat model</h2>
+        <p class="page-meta">Chat can use a local or online model. API always uses an online model. Moving from chat to both keeps the chat database.</p>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="save_product">
+            <div class="choice-grid" style="margin:.75rem 0;">
+                {% if "chat" in selectable_products %}
+                <label><input type="radio" name="product" value="chat"{% if org_product_mode == "chat" %} checked{% endif %}> Chat</label>
+                {% endif %}
+                {% if "api" in selectable_products %}
+                <label><input type="radio" name="product" value="api"{% if org_product_mode == "api" %} checked{% endif %}> API</label>
+                {% endif %}
+                {% if "both" in selectable_products %}
+                <label><input type="radio" name="product" value="both"{% if org_product_mode == "both" %} checked{% endif %}> Both</label>
+                {% endif %}
+            </div>
+            {% if chat_enabled or org_product_mode == "chat" or org_product_mode == "both" %}
+            <div class="field">
+                <label>Chat model</label>
+                <div class="choice-grid" style="margin-top:.4rem;">
+                    <label><input type="radio" name="llm_backend" value="local"{% if org_llm_backend != "online" %} checked{% endif %}> Local (Ollama)</label>
+                    <label><input type="radio" name="llm_backend" value="online"{% if org_llm_backend == "online" %} checked{% endif %}> Online (Gemini)</label>
+                </div>
+            </div>
+            {% endif %}
+            <button class="btn btn-primary" type="submit">Save products</button>
+        </form>
+    </section>
+    {% endif %}
+
+    <section class="dash-stats" aria-label="Organization overview">
+        {% for stat in dash_stats %}
+        <article class="dash-stat{% if stat.tone %} dash-stat-{{ stat.tone }}{% endif %}">
+            <span class="dash-stat-label">{{ stat.label }}</span>
+            <strong class="dash-stat-value">{{ stat.value }}</strong>
+            <span class="dash-stat-hint">{{ stat.hint }}</span>
+        </article>
+        {% endfor %}
+    </section>
+
+    {% if dash_allowed_tables %}
+    <p class="dash-allow">
+        Allowed tables:
+        {% for name in dash_allowed_tables %}
+        <span class="chip">{{ name }}</span>
+        {% endfor %}
+        {% if dash_allowed_more %}
+        <span class="chip chip-muted">+{{ dash_allowed_more }} more</span>
+        {% endif %}
+    </p>
+    {% endif %}
+
+    <h2 class="dash-heading">Actions you can take</h2>
+    <p class="page-meta dash-lead">These are the administrator controls for this organization. Users you create cannot open this page.</p>
+    <section class="dash-actions">
+        {% for action in dash_actions %}
+        <article class="dash-action">
+            <div class="dash-action-top">
+                <span class="dash-action-icon" aria-hidden="true"><i class="bi {{ action.icon }}"></i></span>
+                <span class="chip {% if action.tone == 'ok' %}chip-success{% elif action.tone == 'warn' %}{% else %}chip-muted{% endif %}">{{ action.status }}</span>
+            </div>
+            <h3>{{ action.title }}</h3>
+            <p>{{ action.body }}</p>
+            <a class="btn {% if action.tone == 'warn' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url action.href %}{% if action.query %}?{{ action.query }}{% endif %}{% if action.anchor %}#{{ action.anchor }}{% endif %}">{{ action.cta }}</a>
+        </article>
+        {% endfor %}
+    </section>
+
+    <div class="dash-split">
+        <section class="review-card">
+            <h2>Recent questions</h2>
+            <p class="page-meta">Titles only. Message content stays with the person who asked.</p>
+            {% for conv in dash_questions %}
+            <div class="table-row">
+                <div>
+                    <strong>{{ conv.title }}</strong>
+                    <div class="page-meta">{{ conv.updated_at|date:"M j, Y" }} · {{ conv.user.get_full_name|default:conv.user }}</div>
+                </div>
+            </div>
+            {% empty %}
+            <p class="page-meta">No questions in this organization yet.</p>
+            {% endfor %}
+        </section>
+
+        {% if api_enabled %}
+        <section class="review-card" id="api-requests">
+            <h2>API access requests</h2>
+            <p class="page-meta">Approve a request before that person can create keys. Denied requests can ask again from the API page.</p>
+            {% for access in dash_pending_api %}
+            <div class="table-row">
+                <div>
+                    <strong>{{ access.user.get_full_name|default:access.user.email }}</strong>
+                    <div class="page-meta">{{ access.user.email }} · {{ access.created_at|date:"M j, Y" }}</div>
+                    {% if access.note %}<div class="page-meta">{{ access.note }}</div>{% endif %}
+                </div>
+                <div class="dash-request-actions">
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="request_id" value="{{ access.id }}">
+                        <input type="hidden" name="action" value="approve_api">
+                        <button class="btn btn-primary" type="submit">Approve</button>
+                    </form>
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="request_id" value="{{ access.id }}">
+                        <input type="hidden" name="action" value="deny_api">
+                        <button class="btn btn-secondary" type="submit">Deny</button>
+                    </form>
+                </div>
+            </div>
+            {% empty %}
+            <p class="page-meta">No pending requests.</p>
+            {% endfor %}
+        </section>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

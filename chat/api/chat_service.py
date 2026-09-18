@@ -362,8 +362,13 @@ class ChatService:
 
             return "Sorry, I couldn't process your request right now. Please try again later."
 
-    staticmethod
+    @staticmethod
+    def ask_for_backend(prompt: str, backend: str = "local", **kwargs) -> str:
+        if (backend or "local").strip().lower() == "online":
+            return ChatService.ask_ai(prompt)
+        return ChatService.ask_on_premise_ai(prompt, **kwargs)
 
+    @staticmethod
     def process_user_query(generated_sql: str) -> dict:
         # Handle explicit out-of-scope responses from Text-to-SQL
         if not generated_sql or "SELECT NULL" in generated_sql.upper():

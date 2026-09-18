@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from chat.api.chat_service import ChatService
+from agent.llm import ask_state
 from agent.nodes.sql_generator import _clean_sql
 from connections.services.engines import sql_language_name, sqlglot_dialect
 
@@ -50,7 +50,8 @@ def sql_repair(state: QueryMindState) -> dict[str, Any]:
     system = f"You emit a single {sql_language_name(state.engine)} SELECT statement. No markdown."
     try:
         repaired_sql = _clean_sql(
-            ChatService.ask_on_premise_ai(
+            ask_state(
+                state,
                 prompt,
                 temperature=0.2,
                 system=system,
@@ -66,7 +67,8 @@ def sql_repair(state: QueryMindState) -> dict[str, Any]:
     extras = []
     for _ in range(2):
         extra = _clean_sql(
-            ChatService.ask_on_premise_ai(
+            ask_state(
+                state,
                 prompt,
                 temperature=0.35,
                 system=system,

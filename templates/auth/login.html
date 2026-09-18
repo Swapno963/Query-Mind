@@ -5,7 +5,7 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/public.css' %}">
 {% endblock %}
-{% block body_class %}public-body{% endblock %}
+{% block body_class %}public-body auth-body{% endblock %}
 
 {% block body %}
 <header class="public-nav">
@@ -18,32 +18,32 @@
     </a>
 </header>
 <main class="auth-wrap">
-    <div class="auth-card">
-        <div class="brand public-brand">
-            <div class="brand-mark">QM</div>
-            <div class="brand-name">QueryMind</div>
+    <section class="auth-stage">
+        {% include "auth/_visual.html" %}
+        <div class="auth-card">
+            <p class="auth-eyebrow">Welcome back</p>
+            <h1>Log in</h1>
+            <p class="lead">Your database stays yours. QueryMind asks questions against what you allow.</p>
+            {% if messages %}
+            {% for message in messages %}
+            <p class="alert alert-warning">{{ message }}</p>
+            {% endfor %}
+            {% endif %}
+            <form method="post" action="{% url 'login' %}">
+                {% csrf_token %}
+                <div class="field">
+                    <label for="email">Email</label>
+                    <input id="email" name="email" type="email" autocomplete="email" required>
+                </div>
+                <div class="field">
+                    <label for="password">Password</label>
+                    <input id="password" name="password" type="password" autocomplete="current-password" required>
+                </div>
+                <p class="hint">Use the email and password for your QueryMind account.</p>
+                <button class="btn btn-primary" type="submit">Log in</button>
+            </form>
+            <p class="auth-switch">New here? <a href="{% url 'register' %}">Create an account</a></p>
         </div>
-        <h1>Log in</h1>
-        <p class="lead">Your database stays yours. QueryMind asks questions against what you allow.</p>
-        {% if messages %}
-        {% for message in messages %}
-        <p class="alert alert-warning">{{ message }}</p>
-        {% endfor %}
-        {% endif %}
-        <form method="post" action="{% url 'login' %}">
-            {% csrf_token %}
-            <div class="field">
-                <label for="email">Email</label>
-                <input id="email" name="email" type="email" autocomplete="email" required>
-            </div>
-            <div class="field">
-                <label for="password">Password</label>
-                <input id="password" name="password" type="password" autocomplete="current-password" required>
-            </div>
-            <p class="hint">Use the email and password for your QueryMind account.</p>
-            <button class="btn btn-primary" type="submit">Log in</button>
-        </form>
-        <p class="auth-switch">New here? <a href="{% url 'register' %}">Create an account</a></p>
-    </div>
+    </section>
 </main>
 {% endblock %}

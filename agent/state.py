@@ -48,6 +48,7 @@ class QueryMindState:
 
     retry_count: int = 0
     max_retries: int = 3
+    llm_backend: str = "local"
 
     final_answer: str | None = None
     answer_kind: str | None = None

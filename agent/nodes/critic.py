@@ -1,7 +1,7 @@
 import json
 from typing import Any
 
-from chat.api.chat_service import ChatService
+from agent.llm import ask_state
 from connections.services.sql_critic import critique_sql
 from connections.services.engines import sqlglot_dialect
 from ..intent import is_trivial_intent
@@ -61,7 +61,8 @@ Return JSON only: {{"ok": true, "issues": [], "confidence": 0.0}}
 Flag fan_out_on_sum, wrong_filter, wrong_grain, missing_time_filter.
 """.strip()
     try:
-        raw = ChatService.ask_on_premise_ai(
+        raw = ask_state(
+            state,
             prompt,
             temperature=0.0,
             system="You emit JSON only.",

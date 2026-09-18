@@ -26,6 +26,23 @@ def user_has_approved_api_access(user) -> bool:
     ).exists()
 
 
+def set_org_api_access_status(*, org, request_id, status: str) -> ApiAccessRequest:
+    if status not in {
+        ApiAccessRequest.STATUS_APPROVED,
+        ApiAccessRequest.STATUS_DENIED,
+    }:
+        raise ValueError("Invalid API access status.")
+    access = ApiAccessRequest.objects.filter(
+        pk=request_id,
+        user__org_memberships__organization=org,
+    ).first()
+    if access is None:
+        raise ApiAccessRequest.DoesNotExist
+    access.status = status
+    access.save(update_fields=["status", "updated_at"])
+    return access
+
+
 def lookup_api_key(raw: str) -> ApiKey | None:
     if not raw:
         return None

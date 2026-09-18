@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from chat.api.chat_service import ChatService
+from agent.llm import ask_state
 from connections.services.result_prompt import SQLResultPromptGenerator
 
 from ..state import QueryMindState
@@ -72,7 +72,7 @@ def result_formatter(state: QueryMindState) -> dict[str, Any]:
 
     try:
 
-        final_answer = ChatService.ask_on_premise_ai(answer_prompt)
+        final_answer = ask_state(state, answer_prompt)
 
     except Exception as exc:
 

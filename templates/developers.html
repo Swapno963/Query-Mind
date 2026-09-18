@@ -10,7 +10,7 @@
         </button>
         <div>
             <h1 class="page-title">QueryMind API</h1>
-            <div class="page-meta">You run SQL on your Postgres. QueryMind never stores a database password for this workspace.</div>
+            <div class="page-meta">API uses an online model. Database credentials are stored so QueryMind can reconnect after restart. This connection is separate from chat.</div>
         </div>
     </div>
     {% if api_approved %}
@@ -30,113 +30,315 @@
         {% endfor %}
     {% endif %}
 
-    {% if new_api_key %}
-    <div class="review-card">
-        <h2 class="page-title" style="margin-bottom:.5rem;">Your API key</h2>
-        <p class="page-meta">Copy it now. QueryMind will not show the secret again.</p>
-        <pre class="docs-pre"><code>{{ new_api_key }}</code></pre>
-    </div>
-    {% endif %}
-
-    <div class="review-card">
-        <h2 class="page-title" style="margin-bottom:.5rem;">1. Request access</h2>
-        <p>Staff must approve your account before a key can be created. Chat setup is not required.</p>
-        {% if not api_approved %}
-        <form method="post" action="{% url 'developers' %}">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="request">
-            <div class="field">
-                <label for="note">Note (optional)</label>
-                <textarea id="note" name="note" rows="2" placeholder="How you plan to use the API"></textarea>
+    <div class="docs-layout">
+        <div class="docs-main">
+            <div class="review-card" id="request-access">
+                <h2 class="page-title" style="margin-bottom:.5rem;">1. Request access</h2>
+                <p>Staff must approve your account before a key can be created. Chat setup is not required.</p>
+                {% if not api_approved %}
+                <form method="post" action="{% url 'developers' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="request">
+                    <div class="field">
+                        <label for="note">Note (optional)</label>
+                        <textarea id="note" name="note" rows="2" placeholder="How you plan to use the API"></textarea>
+                    </div>
+                    <button class="btn btn-primary" type="submit" {% if api_status == "pending" %}disabled{% endif %}>
+                        {% if api_status == "pending" %}Waiting for approval{% else %}Request API access{% endif %}
+                    </button>
+                </form>
+                {% else %}
+                <p class="page-meta">Approved. Create a key, then follow the requests below.</p>
+                {% endif %}
             </div>
-            <button class="btn btn-primary" type="submit" {% if api_status == "pending" %}disabled{% endif %}>
-                {% if api_status == "pending" %}Waiting for approval{% else %}Request API access{% endif %}
-            </button>
-        </form>
-        {% else %}
-        <p class="page-meta">Approved. Create a key, then follow the requests below.</p>
-        {% endif %}
-    </div>
 
-    <div class="review-card">
-        <h2 class="page-title" style="margin-bottom:.5rem;">2. Create a key</h2>
-        <p>Send it as <code>x-api-key</code> or <code>Authorization: Bearer</code>. Identity is the key’s user. Do not send a <code>user_id</code>.</p>
-        {% if api_key_prefixes %}
-        <p class="page-meta">Existing prefixes: {{ api_key_prefixes|join:", " }}</p>
-        {% endif %}
-        {% if api_approved %}
-        <form method="post" action="{% url 'developers' %}">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="create_key">
-            <button class="btn btn-primary" type="submit">Create API key</button>
-        </form>
-        {% endif %}
-    </div>
+            <div class="review-card" id="create-key">
+                <h2 class="page-title" style="margin-bottom:.5rem;">2. Create a key</h2>
+                <p>Send it as <code>x-api-key</code> or <code>Authorization: Bearer</code>. Identity is the key’s user. Do not send a <code>user_id</code>.</p>
+                {% if revealed_api_key %}
+                <div class="api-key-reveal">
+                    <p class="page-meta">Copy it now. QueryMind will not show the secret again.</p>
+                    <pre class="docs-pre api-key-secret"><code>{{ revealed_api_key }}</code></pre>
+                </div>
+                {% endif %}
+                {% if api_keys %}
+                <ul class="api-key-list">
+                    {% for key in api_keys %}
+                    <li class="api-key-row">
+                        <code class="api-key-mask">{{ key.masked }}</code>
+                        {% if key.can_reveal %}
+                        <form class="api-key-reveal-form" method="post" action="{% url 'developers' %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="reveal_key">
+                            <input type="hidden" name="key_id" value="{{ key.id }}">
+                            <label class="sr-only" for="reveal-password-{{ key.id }}">Password</label>
+                            <input id="reveal-password-{{ key.id }}" type="password" name="password" required placeholder="Your password" autocomplete="current-password">
+                            <button class="btn btn-primary" type="submit">Copy secret</button>
+                        </form>
+                        {% elif not revealed_api_key %}
+                        <p class="page-meta">Secret is no longer stored. Create a new key.</p>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% if api_approved %}
+                <form method="post" action="{% url 'developers' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="create_key">
+                    <button class="btn btn-primary" type="submit">Create API key</button>
+                </form>
+                {% endif %}
+            </div>
 
-    <div class="review-card">
-        <h2 class="page-title" style="margin-bottom:.5rem;">Authentication</h2>
-        <pre class="docs-pre"><code>curl {{ api_origin }}/api/v1/workspace/ \
+            <div class="review-card" id="authentication">
+                <h2 class="page-title" style="margin-bottom:.5rem;">Authentication</h2>
+                <p>Identity is the key. Health checks do not need a key.</p>
+                <div class="docs-sample">
+                    <div>
+                        <div class="docs-sample-label">Request</div>
+                        <pre class="docs-pre" data-lang="bash"><code>curl {{ api_origin }}/api/v1/workspace/ \
   --header "x-api-key: $QUERYMIND_API_KEY"</code></pre>
-        <p class="page-meta">Check <code>{{ api_origin }}/api/v1/health</code> without a key.</p>
-    </div>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Example response</div>
+                        <pre class="docs-pre" data-lang="json"><code>{
+  "kind": "api",
+  "engine": "postgres",
+  "industry": "Retail / e-commerce",
+  "business": "We sell online.",
+  "keeps": ["orders"],
+  "discovered_tables": ["orders"],
+  "discovered_columns": {
+    "orders": ["id", "status"]
+  },
+  "allowed_tables": ["orders"],
+  "allowed_columns": {
+    "orders": ["id", "status"]
+  },
+  "ready": true
+}</code></pre>
+                    </div>
+                </div>
+                <p class="page-meta">Check <code>{{ api_origin }}/api/v1/health</code> without a key.</p>
+            </div>
 
-    <div class="review-card">
-        <h2 class="page-title" style="margin-bottom:.5rem;">Errors</h2>
-        <p>Failed requests return:</p>
-        <pre class="docs-pre"><code>{
+            <div class="review-card" id="errors">
+                <h2 class="page-title" style="margin-bottom:.5rem;">Errors</h2>
+                <p>Failed requests return a typed error. Missing or invalid keys look like this.</p>
+                <div class="docs-sample">
+                    <div>
+                        <div class="docs-sample-label">Request</div>
+                        <pre class="docs-pre" data-lang="bash"><code>curl {{ api_origin }}/api/v1/workspace/</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Example response</div>
+                        <pre class="docs-pre" data-lang="json"><code>{
   "type": "error",
   "error": {
     "type": "authentication_error",
     "message": "Invalid API key."
   }
 }</code></pre>
-    </div>
+                    </div>
+                </div>
+            </div>
 
-    <div class="review-card">
-        <h2 class="page-title" style="margin-bottom:.5rem;">3. Profile (optional)</h2>
-        <pre class="docs-pre"><code>curl -X PUT {{ api_origin }}/api/v1/profile/ \
+            <div class="review-card" id="profile">
+                <h2 class="page-title" style="margin-bottom:.5rem;">3. Profile (optional)</h2>
+                <p>Tell QueryMind what the business does. Only an organization administrator can change this.</p>
+                <div class="docs-sample">
+                    <div>
+                        <div class="docs-sample-label">Request</div>
+                        <pre class="docs-pre" data-lang="bash"><code>curl -X PUT {{ api_origin }}/api/v1/profile/ \
   --header "x-api-key: $QUERYMIND_API_KEY" \
   --header "content-type: application/json" \
-  --data '{"industry":"Retail / e-commerce","business":"We sell online.","keeps":["orders"]}'</code></pre>
-    </div>
+  --data '{
+    "industry": "Retail / e-commerce",
+    "business": "We sell online.",
+    "keeps": ["orders"]
+  }'</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Example response</div>
+                        <pre class="docs-pre" data-lang="json"><code>{
+  "kind": "api",
+  "engine": "postgres",
+  "industry": "Retail / e-commerce",
+  "business": "We sell online.",
+  "keeps": ["orders"],
+  "discovered_tables": [],
+  "discovered_columns": {},
+  "allowed_tables": [],
+  "allowed_columns": {},
+  "ready": false
+}</code></pre>
+                    </div>
+                </div>
+            </div>
 
-    <div class="review-card">
-        <h2 class="page-title" style="margin-bottom:.5rem;">4. Discover tables and columns</h2>
-        <p>Get the SQL, run it on your Postgres, then post the rows. QueryMind saves the catalog on your <strong>API</strong> workspace only.</p>
-        <pre class="docs-pre"><code>curl {{ api_origin }}/api/v1/discover/instructions/ \
-  --header "x-api-key: $QUERYMIND_API_KEY"
-
-curl -X POST {{ api_origin }}/api/v1/discover/ \
+            <div class="review-card" id="discover">
+                <h2 class="page-title" style="margin-bottom:.5rem;">4. Discover tables and columns</h2>
+                <p>Get the SQL, run it on your database, then post the rows. QueryMind saves the catalog on your <strong>API</strong> workspace only.</p>
+                <div class="docs-sample">
+                    <div>
+                        <div class="docs-sample-label">Request — instructions</div>
+                        <pre class="docs-pre" data-lang="bash"><code>curl "{{ api_origin }}/api/v1/discover/instructions/?engine=postgres" \
+  --header "x-api-key: $QUERYMIND_API_KEY"</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Example response</div>
+                        <pre class="docs-pre" data-lang="json"><code>{
+  "dialect": "postgres",
+  "engine": "postgres",
+  "sql": "SELECT table_schema, table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'",
+  "instructions": "Run this read-only SQL on your PostgreSQL database, then POST the rows to /api/v1/discover."
+}</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Request — ingest rows</div>
+                        <pre class="docs-pre" data-lang="bash"><code>curl -X POST {{ api_origin }}/api/v1/discover/ \
   --header "x-api-key: $QUERYMIND_API_KEY" \
   --header "content-type: application/json" \
-  --data '{"rows":[{"table_name":"orders","column_name":"id"},{"table_name":"orders","column_name":"status"}]}'</code></pre>
-    </div>
+  --data '{
+    "rows": [
+      {"table_name": "orders", "column_name": "id"},
+      {"table_name": "orders", "column_name": "status"}
+    ]
+  }'</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Example response</div>
+                        <pre class="docs-pre" data-lang="json"><code>{
+  "kind": "api",
+  "engine": "postgres",
+  "tables": ["orders"],
+  "columns": {
+    "orders": ["id", "status"]
+  }
+}</code></pre>
+                    </div>
+                </div>
+            </div>
 
-    <div class="review-card">
-        <h2 class="page-title" style="margin-bottom:.5rem;">5. Allow-list</h2>
-        <p>Invented names are ignored. Each allowed table needs at least one discovered column.</p>
-        <pre class="docs-pre"><code>curl -X PUT {{ api_origin }}/api/v1/access/ \
+            <div class="review-card" id="allow-list">
+                <h2 class="page-title" style="margin-bottom:.5rem;">5. Allow-list</h2>
+                <p>Invented names are ignored. Each allowed table needs at least one discovered column.</p>
+                <div class="docs-sample">
+                    <div>
+                        <div class="docs-sample-label">Request</div>
+                        <pre class="docs-pre" data-lang="bash"><code>curl -X PUT {{ api_origin }}/api/v1/access/ \
   --header "x-api-key: $QUERYMIND_API_KEY" \
   --header "content-type: application/json" \
-  --data '{"allowed_tables":["orders"],"allowed_columns":{"orders":["id","status"]}}'</code></pre>
-        {% if api_ready %}
-        <p class="page-meta">This API workspace is ready for questions.</p>
-        {% endif %}
-    </div>
+  --data '{
+    "allowed_tables": ["orders"],
+    "allowed_columns": {
+      "orders": ["id", "status"]
+    }
+  }'</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Example response</div>
+                        <pre class="docs-pre" data-lang="json"><code>{
+  "kind": "api",
+  "engine": "postgres",
+  "industry": "Retail / e-commerce",
+  "business": "We sell online.",
+  "keeps": ["orders"],
+  "discovered_tables": ["orders"],
+  "discovered_columns": {
+    "orders": ["id", "status"]
+  },
+  "allowed_tables": ["orders"],
+  "allowed_columns": {
+    "orders": ["id", "status"]
+  },
+  "ready": true
+}</code></pre>
+                    </div>
+                </div>
+                {% if api_ready %}
+                <p class="page-meta">This API workspace is ready for questions.</p>
+                {% endif %}
+            </div>
 
-    <div class="review-card">
-        <h2 class="page-title" style="margin-bottom:.5rem;">6. Messages</h2>
-        <p>Ask a question. QueryMind returns SQL. You execute it. Then post rows for a natural-language answer.</p>
-        <pre class="docs-pre"><code>curl -X POST {{ api_origin }}/api/v1/messages/ \
+            <div class="review-card" id="messages">
+                <h2 class="page-title" style="margin-bottom:.5rem;">6. Messages</h2>
+                <p>Ask a question. QueryMind returns SQL. You execute it. Then post rows for a natural-language answer.</p>
+                <div class="docs-sample">
+                    <div>
+                        <div class="docs-sample-label">Request — ask</div>
+                        <pre class="docs-pre" data-lang="bash"><code>curl -X POST {{ api_origin }}/api/v1/messages/ \
   --header "x-api-key: $QUERYMIND_API_KEY" \
   --header "content-type: application/json" \
-  --data '{"content":"How many unpaid orders?"}'
-
-curl -X POST {{ api_origin }}/api/v1/messages/results/ \
+  --data '{
+    "content": "How many unpaid orders?"
+  }'</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Example response</div>
+                        <pre class="docs-pre" data-lang="json"><code>{
+  "id": "msg_12",
+  "type": "message",
+  "role": "assistant",
+  "stop_reason": "sql",
+  "user_message_id": 12,
+  "conversation_id": 4,
+  "conversation_created": true,
+  "content": [
+    {
+      "type": "sql",
+      "sql": "SELECT COUNT(*) AS n FROM orders WHERE status = 'unpaid'",
+      "executable": true
+    }
+  ]
+}</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Request — post result rows</div>
+                        <pre class="docs-pre" data-lang="bash"><code>curl -X POST {{ api_origin }}/api/v1/messages/results/ \
   --header "x-api-key: $QUERYMIND_API_KEY" \
   --header "content-type: application/json" \
-  --data '{"user_message_id":12,"rows":[{"n":12}]}'</code></pre>
-        <p class="page-meta"><code>stop_reason: sql</code> means run the SQL. <code>end_turn</code> means the answer is stored.</p>
+  --data '{
+    "user_message_id": 12,
+    "rows": [{"n": 12}]
+  }'</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Example response</div>
+                        <pre class="docs-pre" data-lang="json"><code>{
+  "id": "msg_13",
+  "type": "message",
+  "role": "assistant",
+  "stop_reason": "end_turn",
+  "user_message_id": 12,
+  "conversation_id": 4,
+  "content": [
+    {
+      "type": "text",
+      "text": "There are 12 unpaid orders."
+    }
+  ]
+}</code></pre>
+                    </div>
+                </div>
+                <p class="page-meta"><code>stop_reason: sql</code> means run the SQL. <code>end_turn</code> means the answer is stored.</p>
+            </div>
+        </div>
+
+        <nav class="docs-toc" aria-label="On this page">
+            <h2>On this page</h2>
+            <a href="#request-access">Request access</a>
+            <a href="#create-key">Create a key</a>
+            <div class="docs-toc-sub">
+                <a href="#authentication">Authentication</a>
+                <a href="#errors">Errors</a>
+                <a href="#profile">Profile</a>
+                <a href="#discover">Discover</a>
+                <a href="#allow-list">Allow-list</a>
+                <a href="#messages">Messages</a>
+            </div>
+        </nav>
     </div>
 </div>
 {% endblock %}

@@ -8,9 +8,10 @@ from django.shortcuts import get_object_or_404
 from django.views.generic import View
 from django.views.generic.detail import SingleObjectMixin
 
-from agent.graph import build_on_premise_graph
+from agent.graph import build_on_premise_graph, build_online_graph
 from agent.state import QueryMindState
-from chat.organizations import mcp_server_url_for
+from chat.organizations import mcp_server_url_for, organization_for
+from chat.product import org_chat_enabled, org_llm_backend
 from chat.ui import KIND_CHAT, chat_ready, workspace_for
 
 from .constants import ERROR_MESSAGES
@@ -38,6 +39,9 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
             Message, id=message_id, conversation=conversation, is_user=True
         )
         workspace = workspace_for(request.user, KIND_CHAT)
+        org = organization_for(request.user)
+        if not org_chat_enabled(org):
+            return HttpResponse("This organization does not use chat.", status=403)
         mcp_url = mcp_server_url_for(request.user)
         if not chat_ready(workspace) and not mcp_url:
             return StreamingHttpResponse(
@@ -54,6 +58,7 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
             f"{'User' if msg.is_user else 'Assistant'}: {msg.content}"
             for msg in previous_messages
         )
+        backend = org_llm_backend(org)
 
         state = QueryMindState(
             question=user_message.content,
@@ -67,6 +72,7 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
             conversation_context=conversation_context,
             engine=workspace.engine if workspace else "postgres",
             mcp_server_url=mcp_url,
+            llm_backend=backend,
         )
 
         def generate():
@@ -88,7 +94,11 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
             }
             outcome = {}
             try:
-                graph = build_on_premise_graph()
+                graph = (
+                    build_on_premise_graph()
+                    if backend == "local"
+                    else build_online_graph()
+                )
                 for event in graph.stream(state):
                     first_key = next(iter(event.keys()))
                     payload = event.get(first_key) or {}

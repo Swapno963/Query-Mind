@@ -9,6 +9,7 @@ def classify_operation(state: QueryMindState) -> dict[str, Any]:
         state.question,
         state.conversation_context,
         use_llm=True,
+        backend=getattr(state, "llm_backend", "local") or "local",
     )
     if not intent.get("valid"):
         reason = intent.get("reason") or "needs_clarification"

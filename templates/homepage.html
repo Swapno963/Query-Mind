@@ -54,7 +54,7 @@
         <p>Chat needs a live database connection and the tables you allow. If you only want the API, QueryMind should never connect to your database.</p>
         <p>
             {% if is_org_admin %}
-            <a class="btn btn-primary" href="{% url 'onboarding' %}">Set up chat</a>
+            <a class="btn btn-primary" href="{% url 'onboarding' %}?track=chat">Set up chat</a>
             {% else %}
             <span class="page-meta">Ask your administrator to connect the organization’s database.</span>
             {% endif %}

@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from chat.api.chat_service import ChatService
+from agent.llm import ask_llm
 
 
 READ = "READ"
@@ -203,7 +203,7 @@ def rule_based_operation(question: str) -> dict[str, Any]:
     return validate_operation_intent(intent)
 
 
-def llm_operation(question: str, conversation_context: str = "") -> dict[str, Any]:
+def llm_operation(question: str, conversation_context: str = "", *, backend: str = "local") -> dict[str, Any]:
     prompt = f"""
 Convert the user request into JSON operation intent. Do not execute anything.
 
@@ -229,8 +229,9 @@ CONVERSATION:
 REQUEST:
 {question}
 """.strip()
-    raw = ChatService.ask_on_premise_ai(
+    raw = ask_llm(
         prompt,
+        backend=backend,
         temperature=0.0,
         system="You emit JSON only. You do not execute operations.",
     )
@@ -251,6 +252,7 @@ def extract_operation(
     conversation_context: str = "",
     *,
     use_llm: bool = True,
+    backend: str = "local",
 ) -> dict[str, Any]:
     forced = mutation_verb_operation(question)
     ruled = rule_based_operation(question)
@@ -264,7 +266,7 @@ def extract_operation(
     if not use_llm:
         return ruled
     try:
-        llm = llm_operation(question, conversation_context)
+        llm = llm_operation(question, conversation_context, backend=backend)
     except Exception:
         return ruled
     if forced:

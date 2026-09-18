@@ -9,6 +9,7 @@ from DjangoForAI.health import health_check
 from chat.urls import (
     api_portal_urlpatterns,
     chat_product_urlpatterns,
+    onboarding_urlpatterns,
     public_urlpatterns,
 )
 
@@ -17,6 +18,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/health", health_check),
     *public_urlpatterns,
+    *onboarding_urlpatterns,
 ]
 
 if settings.CHAT_ENABLED:

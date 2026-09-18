@@ -46,15 +46,15 @@
             {% endfor %}
         </div>
         {% if is_org_admin %}
-        <p><a class="btn btn-secondary" href="{% url 'onboarding' %}">Change access</a></p>
+        <p><a class="btn btn-secondary" href="{% url 'onboarding' %}?track=chat">Change access</a></p>
         {% endif %}
         {% else %}
         <div class="empty-setup" style="margin:0;">
             <h1>No data connected yet</h1>
-            <p>Tell QueryMind about your work and choose which tables chat may use. The API uses a separate workspace and never needs this connection.</p>
+            <p>Tell QueryMind about your work and choose which tables chat may use. The API uses a separate database connection.</p>
             <p>
                 {% if is_org_admin %}
-                <a class="btn btn-primary" href="{% url 'onboarding' %}">Set up chat</a>
+                <a class="btn btn-primary" href="{% url 'onboarding' %}?track=chat">Set up chat</a>
                 {% else %}
                 <span class="page-meta">Your administrator manages the shared database connection.</span>
                 {% endif %}

@@ -7,7 +7,7 @@ from connections.services.schema_discovery import (
     extract_relationships_from_schema,
     filter_schema_to_tables,
 )
-from chat.api.chat_service import ChatService
+from agent.llm import ask_state
 
 from ..state import QueryMindState
 
@@ -66,7 +66,8 @@ def schema(state: QueryMindState) -> dict[str, Any]:
                 conversation_context=state.conversation_context,
                 intent=state.intent,
             )
-            discovered_schema = ChatService.ask_on_premise_ai(
+            discovered_schema = ask_state(
+                state,
                 prompt,
                 temperature=0.1,
                 system="You emit JSON only.",

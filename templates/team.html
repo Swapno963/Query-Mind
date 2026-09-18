@@ -22,6 +22,33 @@
     </p>
     {% endif %}
     <div class="review-card">
+        <h2>Products and chat model</h2>
+        <p class="page-meta">Only administrators can change this. Existing database connections are kept when you add a product.</p>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="save_product">
+            <div class="choice-grid" style="margin:.75rem 0;">
+                {% if "chat" in selectable_products %}
+                <label><input type="radio" name="product" value="chat"{% if org_product_mode == "chat" %} checked{% endif %}> Chat</label>
+                {% endif %}
+                {% if "api" in selectable_products %}
+                <label><input type="radio" name="product" value="api"{% if org_product_mode == "api" %} checked{% endif %}> API</label>
+                {% endif %}
+                {% if "both" in selectable_products %}
+                <label><input type="radio" name="product" value="both"{% if org_product_mode == "both" %} checked{% endif %}> Both</label>
+                {% endif %}
+            </div>
+            <div class="field">
+                <label>Chat model</label>
+                <div class="choice-grid" style="margin-top:.4rem;">
+                    <label><input type="radio" name="llm_backend" value="local"{% if org_llm_backend != "online" %} checked{% endif %}> Local (Ollama)</label>
+                    <label><input type="radio" name="llm_backend" value="online"{% if org_llm_backend == "online" %} checked{% endif %}> Online (Gemini)</label>
+                </div>
+            </div>
+            <button class="btn btn-secondary" type="submit">Save products</button>
+        </form>
+    </div>
+    <div class="review-card">
         <h2>MCP server</h2>
         <p class="page-meta">Writes (create, update, delete, business actions) only run through this server. Reads use MCP when a tool can satisfy the request; otherwise QueryMind uses the read-only SQL agent.</p>
         <form method="post">
