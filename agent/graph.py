@@ -13,6 +13,38 @@ from .nodes.error_analyzer import error_analyzer
 from .nodes.sql_repair import sql_repair
 from .nodes.result_formatter import result_formatter
 from .nodes.refuse import refuse_answer
+from .nodes.classify import classify_operation
+from .nodes.policy import policy_check
+from .nodes.capability import capability_resolve
+from .nodes.mcp_executor import mcp_execute
+
+
+def route_after_classify(state: QueryMindState) -> str:
+    if state.execution_mode in {"clarify", "deny"} or state.status == "failed":
+        return "refuse"
+    return "policy"
+
+
+def route_after_policy(state: QueryMindState) -> str:
+    if state.execution_mode == "deny" or state.status == "failed":
+        return "refuse"
+    return "capability"
+
+
+def route_after_capability(state: QueryMindState) -> str:
+    mode = state.execution_mode
+    if mode == "mcp":
+        return "mcp"
+    if mode == "sql":
+        return "planner"
+    return "refuse"
+
+
+def route_after_mcp_execute(state: QueryMindState) -> str:
+    execution = state.execution_result or {}
+    if execution.get("success"):
+        return "format"
+    return "refuse"
 
 
 def route_after_planner(state: QueryMindState) -> str:
@@ -100,6 +132,30 @@ def route_after_on_premise_error_analysis(state: QueryMindState) -> str:
     return "end"
 
 
+def _add_control_nodes(workflow):
+    workflow.add_node("classify_operation", classify_operation)
+    workflow.add_node("policy_check", policy_check)
+    workflow.add_node("capability_resolve", capability_resolve)
+    workflow.add_node("mcp_execute", mcp_execute)
+    workflow.add_node("refuse", refuse_answer)
+    workflow.add_edge(START, "classify_operation")
+    workflow.add_conditional_edges(
+        "classify_operation",
+        route_after_classify,
+        {"policy": "policy_check", "refuse": "refuse"},
+    )
+    workflow.add_conditional_edges(
+        "policy_check",
+        route_after_policy,
+        {"capability": "capability_resolve", "refuse": "refuse"},
+    )
+    workflow.add_conditional_edges(
+        "capability_resolve",
+        route_after_capability,
+        {"mcp": "mcp_execute", "planner": "planner", "refuse": "refuse"},
+    )
+
+
 def build_on_premise_graph():
     workflow = StateGraph(QueryMindState)
 
@@ -113,9 +169,13 @@ def build_on_premise_graph():
     workflow.add_node("error_analyzer", error_analyzer)
     workflow.add_node("sql_repair", sql_repair)
     workflow.add_node("result_formatter", result_formatter)
-    workflow.add_node("refuse", refuse_answer)
+    _add_control_nodes(workflow)
 
-    workflow.add_edge(START, "planner")
+    workflow.add_conditional_edges(
+        "mcp_execute",
+        route_after_mcp_execute,
+        {"format": "result_formatter", "refuse": "refuse"},
+    )
     workflow.add_conditional_edges(
         "planner",
         route_after_planner,
@@ -193,9 +253,14 @@ def build_api_query_graph():
     workflow.add_node("sql_validator", sql_validator)
     workflow.add_node("sql_critic", sql_critic)
     workflow.add_node("sql_repair", sql_repair)
-    workflow.add_node("refuse", refuse_answer)
+    workflow.add_node("result_formatter", result_formatter)
+    _add_control_nodes(workflow)
 
-    workflow.add_edge(START, "planner")
+    workflow.add_conditional_edges(
+        "mcp_execute",
+        route_after_mcp_execute,
+        {"format": "result_formatter", "refuse": "refuse"},
+    )
     workflow.add_conditional_edges(
         "planner",
         route_after_planner,
@@ -227,6 +292,7 @@ def build_api_query_graph():
     )
 
     workflow.add_edge("sql_repair", "sql_validator")
+    workflow.add_edge("result_formatter", END)
     workflow.add_edge("refuse", END)
 
     return workflow.compile()

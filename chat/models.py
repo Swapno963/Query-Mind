@@ -181,6 +181,7 @@ class Organization(models.Model):
         blank=True,
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    mcp_server_url = models.URLField(max_length=500, blank=True, default="")
 
     def __str__(self):
         return self.name

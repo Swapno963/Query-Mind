@@ -41,6 +41,11 @@ def organization_for(user) -> Organization | None:
     return membership.organization if membership else None
 
 
+def mcp_server_url_for(user) -> str:
+    org = organization_for(user)
+    return (getattr(org, "mcp_server_url", None) or "").strip() if org else ""
+
+
 def is_org_admin(user) -> bool:
     membership = active_membership(user)
     return bool(

@@ -21,7 +21,7 @@ from chat.api_keys import generate_api_key, user_has_approved_api_access
 from chat.models import ApiAccessRequest, ApiKey, Conversation, Message
 from chat.permissions import IsApiKeyAuthenticated
 from chat.services import ConversationService
-from chat.organizations import is_org_admin
+from chat.organizations import is_org_admin, mcp_server_url_for
 from chat.ui import KIND_API, api_ready, get_or_create_workspace as create_workspace, workspace_for
 from connections.models import WorkspaceConnection
 from connections.services.catalog import (
@@ -276,7 +276,8 @@ class WorkspaceView(APIView):
 
 def _run_sql_generation(user, content: str):
     workspace = workspace_for(user, KIND_API)
-    if not api_ready(workspace):
+    mcp_url = mcp_server_url_for(user)
+    if not api_ready(workspace) and not mcp_url:
         return None, api_error(
             "permission_error",
             "Choose allowed tables and columns before asking.",
@@ -294,12 +295,13 @@ def _run_sql_generation(user, content: str):
         question=content,
         conversation_id=conversation.id,
         message_id=user_message.id,
-        connection_id=workspace.pk,
-        workspace_id=workspace.pk,
-        allowed_tables=list(workspace.allowed_tables or []),
-        allowed_columns=dict(workspace.allowed_columns or {}),
-        schema_text=workspace.schema_text or "",
-        engine=getattr(workspace, "engine", "postgres"),
+        connection_id=workspace.pk if workspace else 0,
+        workspace_id=workspace.pk if workspace else None,
+        allowed_tables=list((workspace.allowed_tables if workspace else None) or []),
+        allowed_columns=dict((workspace.allowed_columns if workspace else None) or {}),
+        schema_text=(workspace.schema_text if workspace else "") or "",
+        engine=getattr(workspace, "engine", "postgres") if workspace else "postgres",
+        mcp_server_url=mcp_url,
     )
     final_state = build_api_query_graph().invoke(state)
     if not isinstance(final_state, dict):
@@ -309,7 +311,53 @@ def _run_sql_generation(user, content: str):
             "critic_result": getattr(final_state, "critic_result", {}) or {},
             "answer_kind": getattr(final_state, "answer_kind", None),
             "database_error": getattr(final_state, "database_error", None),
+            "execution_mode": getattr(final_state, "execution_mode", None),
+            "execution_result": getattr(final_state, "execution_result", {}) or {},
+            "final_answer": getattr(final_state, "final_answer", None),
+            "routing": getattr(final_state, "routing", {}) or {},
         }
+    if final_state.get("execution_mode") == "mcp" or (final_state.get("routing") or {}).get("mode") == "mcp":
+        answer = (final_state.get("final_answer") or "").strip()
+        if not answer:
+            rows = (final_state.get("execution_result") or {}).get("rows") or []
+            answer = str(rows)
+        payload = {
+            "id": f"msg_{user_message.id}",
+            "type": "message",
+            "role": "assistant",
+            "stop_reason": "mcp",
+            "user_message_id": user_message.id,
+            "conversation_id": conversation.id,
+            "conversation_created": created,
+            "routing": final_state.get("routing") or {},
+            "content": [{"type": "text", "text": answer}],
+        }
+        return payload, None
+    if final_state.get("answer_kind") in {
+        "needs_clarification",
+        "unsupported_operation",
+        "mcp_failed",
+    }:
+        message = (
+            final_state.get("final_answer")
+            or final_state.get("database_error")
+            or "QueryMind cannot perform that operation."
+        )
+        return {
+            "id": f"msg_{user_message.id}",
+            "type": "message",
+            "role": "assistant",
+            "stop_reason": "refusal",
+            "user_message_id": user_message.id,
+            "conversation_id": conversation.id,
+            "conversation_created": created,
+            "routing": final_state.get("routing") or {},
+            "content": [{"type": "text", "text": message}],
+            "error": {
+                "type": final_state.get("answer_kind"),
+                "message": message,
+            },
+        }, None
     validation = final_state.get("validation_result") or {}
     critic = final_state.get("critic_result") or {}
     executable = bool(validation.get("valid") and critic.get("ok", True))
@@ -327,6 +375,7 @@ def _run_sql_generation(user, content: str):
         "user_message_id": user_message.id,
         "conversation_id": conversation.id,
         "conversation_created": created,
+        "routing": final_state.get("routing") or {},
         "content": (
             [{"type": "sql", "sql": sql, "executable": True}]
             if executable
@@ -335,6 +384,7 @@ def _run_sql_generation(user, content: str):
                     "type": "text",
                     "text": validation.get("error")
                     or final_state.get("database_error")
+                    or final_state.get("final_answer")
                     or "QueryMind could not read that from your allowed tables and columns.",
                 }
             ]

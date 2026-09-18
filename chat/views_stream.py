@@ -10,6 +10,7 @@ from django.views.generic.detail import SingleObjectMixin
 
 from agent.graph import build_on_premise_graph
 from agent.state import QueryMindState
+from chat.organizations import mcp_server_url_for
 from chat.ui import KIND_CHAT, chat_ready, workspace_for
 
 from .constants import ERROR_MESSAGES
@@ -37,7 +38,8 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
             Message, id=message_id, conversation=conversation, is_user=True
         )
         workspace = workspace_for(request.user, KIND_CHAT)
-        if not chat_ready(workspace):
+        mcp_url = mcp_server_url_for(request.user)
+        if not chat_ready(workspace) and not mcp_url:
             return StreamingHttpResponse(
                 _sse_error_stream(
                     "unavailable",
@@ -57,17 +59,22 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
             question=user_message.content,
             conversation_id=conversation.id,
             message_id=user_message.id,
-            connection_id=workspace.pk,
-            workspace_id=workspace.pk,
-            allowed_tables=list(workspace.allowed_tables or []),
-            allowed_columns=dict(workspace.allowed_columns or {}),
-            schema_text=workspace.schema_text or "",
+            connection_id=workspace.pk if workspace else 0,
+            workspace_id=workspace.pk if workspace else None,
+            allowed_tables=list((workspace.allowed_tables if workspace else None) or []),
+            allowed_columns=dict((workspace.allowed_columns if workspace else None) or {}),
+            schema_text=(workspace.schema_text if workspace else "") or "",
             conversation_context=conversation_context,
-            engine=workspace.engine,
+            engine=workspace.engine if workspace else "postgres",
+            mcp_server_url=mcp_url,
         )
 
         def generate():
             STATUS_MESSAGES = {
+                "classify_operation": "Understanding what you want to do…",
+                "policy_check": "Checking what QueryMind is allowed to do…",
+                "capability_resolve": "Checking available tools…",
+                "mcp_execute": "Running a business operation…",
                 "planner": "Understanding your question…",
                 "schema": "Looking at your data…",
                 "sql_generator": "Looking at your data…",
@@ -77,7 +84,7 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
                 "sql_repair": "Checking the question is safe…",
                 "sql_executor": "Fetching results…",
                 "result_formatter": "Writing your answer…",
-                "refuse": "Could not read that from your allowed tables…",
+                "refuse": "Could not complete that request…",
             }
             outcome = {}
             try:

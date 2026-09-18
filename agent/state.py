@@ -13,6 +13,11 @@ class QueryMindState:
     connection_id: int
 
     intent: dict[str, Any] = field(default_factory=dict)
+    operation_intent: dict[str, Any] = field(default_factory=dict)
+    execution_mode: str | None = None
+    routing: dict[str, Any] = field(default_factory=dict)
+    mcp_result: dict[str, Any] = field(default_factory=dict)
+    mcp_server_url: str = ""
     required_schema: list[str] = field(default_factory=list)
     plan: dict[str, Any] = field(default_factory=dict)
     grain: str = ""

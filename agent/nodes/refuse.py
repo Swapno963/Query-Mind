@@ -17,6 +17,15 @@ REFUSAL_MESSAGES = {
     "connection_failed": (
         "QueryMind could not connect to your database. Check the connection from Your data."
     ),
+    "needs_clarification": (
+        "QueryMind needs a clearer request. Say whether you want to look up, create, update, or delete something."
+    ),
+    "unsupported_operation": (
+        "QueryMind cannot perform that operation. Writes must use a configured MCP tool; SQL cannot change data."
+    ),
+    "mcp_failed": (
+        "QueryMind could not complete that operation through MCP. It will not fall back to SQL for writes."
+    ),
     "error": (
         "QueryMind could not finish this answer. It will not invent database results."
     ),

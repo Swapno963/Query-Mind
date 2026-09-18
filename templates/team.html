@@ -22,6 +22,19 @@
     </p>
     {% endif %}
     <div class="review-card">
+        <h2>MCP server</h2>
+        <p class="page-meta">Writes (create, update, delete, business actions) only run through this server. Reads use MCP when a tool can satisfy the request; otherwise QueryMind uses the read-only SQL agent.</p>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="save_mcp">
+            <div class="field">
+                <label for="mcp_server_url">Server URL</label>
+                <input id="mcp_server_url" name="mcp_server_url" type="url" placeholder="https://example.com/mcp" value="{{ organization.mcp_server_url|default:'' }}">
+            </div>
+            <button class="btn btn-secondary" type="submit">Save MCP URL</button>
+        </form>
+    </div>
+    <div class="review-card">
         <h2>Create a user</h2>
         <form method="post">
             {% csrf_token %}

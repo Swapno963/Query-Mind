@@ -39,6 +39,7 @@ from .organizations import (
     ensure_organization_for_user,
     is_org_admin,
     is_org_member_active,
+    mcp_server_url_for,
     organization_for,
     set_member_active,
 )
@@ -445,6 +446,18 @@ class TeamView(AdminRequiredMixin, View):
     def post(self, request):
         action = request.POST.get("action")
         org = organization_for(request.user)
+        if action == "save_mcp":
+            raw = (request.POST.get("mcp_server_url") or "").strip()
+            if raw and not raw.startswith(("http://", "https://")):
+                messages.error(request, "MCP server URL must start with http:// or https://.")
+                return redirect("team")
+            org.mcp_server_url = raw
+            org.save(update_fields=["mcp_server_url"])
+            messages.success(
+                request,
+                "MCP server saved." if raw else "MCP server cleared. Reads can use SQL; writes require MCP.",
+            )
+            return redirect("team")
         if action == "create":
             name = (request.POST.get("name") or "").strip()
             email = (request.POST.get("email") or "").strip().lower()
@@ -513,7 +526,7 @@ class AskView(AuthenticatedWorkspaceMixin, ListView):
 
     def post(self, request, *args, **kwargs):
         workspace = workspace_for(request.user, KIND_CHAT)
-        if not chat_ready(workspace):
+        if not chat_ready(workspace) and not mcp_server_url_for(request.user):
             if is_org_admin(request.user):
                 messages.error(
                     request,
@@ -591,7 +604,7 @@ class ChatView(AuthenticatedWorkspaceMixin, DetailView):
 
     def post(self, request, conversation_id):
         workspace = workspace_for(request.user, KIND_CHAT)
-        if not chat_ready(workspace):
+        if not chat_ready(workspace) and not mcp_server_url_for(request.user):
             return HttpResponse(
                 "Set up your data before asking. QueryMind will not invent answers.",
                 status=403,

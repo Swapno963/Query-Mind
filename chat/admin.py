@@ -80,8 +80,8 @@ class ApiKeyAdmin(admin.ModelAdmin):
 
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ("name", "created_by", "created_at")
-    search_fields = ("name",)
+    list_display = ("name", "created_by", "mcp_server_url", "created_at")
+    search_fields = ("name", "mcp_server_url")
 
 
 @admin.register(OrganizationMembership)

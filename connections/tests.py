@@ -1,7 +1,9 @@
 from django.test import SimpleTestCase
 
 from agent.graph import (
+    route_after_capability,
     route_after_explain,
+    route_after_mcp_execute,
     route_after_on_premise_critic,
     route_after_on_premise_error_analysis,
     route_after_on_premise_execution,
@@ -80,6 +82,20 @@ class AllowListValidationTests(SimpleTestCase):
         )
         with self.assertRaises(ValueError):
             executor.validate("DELETE FROM orders")
+
+    def test_rejects_insert_update_and_ddl(self):
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders"},
+            allowed_columns={"orders": ["id"]},
+        )
+        for sql in (
+            "INSERT INTO orders (id) VALUES (1)",
+            "UPDATE orders SET id = 1",
+            "DROP TABLE orders",
+        ):
+            with self.subTest(sql=sql):
+                with self.assertRaises(ValueError):
+                    executor.validate(sql)
 
 
 class SchemaFilterTests(SimpleTestCase):
@@ -407,3 +423,184 @@ class EngineSupportTests(SimpleTestCase):
         self.assertIn("DATABASE()", discovery_sql_for("mysql"))
         self.assertIn("user_tab_columns", discovery_sql_for("oracle"))
         self.assertIn("INFORMATION_SCHEMA.COLUMNS", discovery_sql_for("mssql"))
+
+
+GET_ORDER = {
+    "name": "get_order",
+    "description": "Fetch one order by id",
+    "inputSchema": {
+        "type": "object",
+        "properties": {"order_id": {"type": "string"}},
+        "required": ["order_id"],
+    },
+}
+UPDATE_STATUS = {
+    "name": "update_order_status",
+    "description": "Update an order status",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "order_id": {"type": "string"},
+            "status": {"type": "string"},
+        },
+        "required": ["order_id", "status"],
+    },
+}
+CREATE_CUSTOMER = {
+    "name": "create_customer",
+    "description": "Create a customer",
+    "inputSchema": {
+        "type": "object",
+        "properties": {"name": {"type": "string"}},
+    },
+}
+DELETE_CUSTOMER = {
+    "name": "delete_customer",
+    "description": "Delete a customer",
+    "inputSchema": {
+        "type": "object",
+        "properties": {"customer_id": {"type": "string"}},
+    },
+}
+
+
+class ExecutionPolicyTests(SimpleTestCase):
+    def _state(self, **kwargs):
+        data = dict(question="q", conversation_id=1, message_id=1, connection_id=1)
+        data.update(kwargs)
+        return QueryMindState(**data)
+
+    def test_policy_read_allows_sql(self):
+        from agent.policy import decide, resolve_mode
+
+        self.assertTrue(decide("READ")["sql_allowed"])
+        self.assertFalse(decide("UPDATE")["sql_allowed"])
+        self.assertTrue(decide("UPDATE")["mcp_required"])
+        self.assertEqual(resolve_mode(operation="READ", mcp_capable=True, mcp_available=True), "mcp")
+        self.assertEqual(resolve_mode(operation="READ", mcp_capable=False, mcp_available=True), "sql")
+        self.assertEqual(resolve_mode(operation="CREATE", mcp_capable=True, mcp_available=True), "mcp")
+        self.assertEqual(resolve_mode(operation="CREATE", mcp_capable=False, mcp_available=True), "deny")
+        self.assertEqual(resolve_mode(operation="DELETE", mcp_capable=False, mcp_available=False), "deny")
+
+    def test_verb_override_delete_is_not_read(self):
+        from agent.operation import extract_operation
+
+        intent = extract_operation("delete inactive customers", use_llm=False)
+        self.assertEqual(intent["operation"], "DELETE")
+
+    def test_ambiguous_request_is_not_guessed(self):
+        from agent.operation import extract_operation
+
+        intent = extract_operation("Handle this customer.", use_llm=False)
+        self.assertFalse(intent["valid"])
+        self.assertEqual(intent["reason"], "needs_clarification")
+
+    def test_read_get_order_uses_mcp(self):
+        from agent.nodes.capability import capability_resolve
+        from agent.operation import extract_operation
+
+        intent = extract_operation("Show me order 123", use_llm=False)
+        state = self._state(operation_intent=intent, question="Show me order 123")
+        result = capability_resolve(state, tools=[GET_ORDER])
+        self.assertEqual(result["execution_mode"], "mcp")
+        self.assertEqual(result["routing"]["tool"], "get_order")
+        self.assertEqual(result["mcp_result"]["arguments"]["order_id"], "123")
+
+    def test_read_aggregation_falls_back_to_sql(self):
+        from agent.nodes.capability import capability_resolve
+        from agent.operation import extract_operation
+
+        intent = extract_operation(
+            "Show me the 20 products with the highest revenue this year",
+            use_llm=False,
+        )
+        self.assertIn("aggregation", intent["query_features"])
+        state = self._state(operation_intent=intent)
+        result = capability_resolve(state, tools=[GET_ORDER])
+        self.assertEqual(result["execution_mode"], "sql")
+        self.assertTrue(result["routing"]["sql_fallback"])
+
+    def test_update_with_tool_uses_mcp(self):
+        from agent.nodes.capability import capability_resolve
+        from agent.operation import extract_operation
+
+        intent = extract_operation("Mark order 123 as delivered", use_llm=False)
+        self.assertEqual(intent["operation"], "UPDATE")
+        result = capability_resolve(self._state(operation_intent=intent), tools=[UPDATE_STATUS])
+        self.assertEqual(result["execution_mode"], "mcp")
+        self.assertEqual(result["routing"]["tool"], "update_order_status")
+
+    def test_update_without_tool_is_denied(self):
+        from agent.nodes.capability import capability_resolve
+        from agent.operation import extract_operation
+
+        intent = extract_operation("Change the customer's credit limit", use_llm=False)
+        result = capability_resolve(self._state(operation_intent=intent), tools=[GET_ORDER])
+        self.assertEqual(result["execution_mode"], "deny")
+        self.assertFalse(result["routing"]["sql_fallback"])
+
+    def test_create_and_delete_routing(self):
+        from agent.nodes.capability import capability_resolve
+        from agent.operation import extract_operation
+
+        created = extract_operation("Create a customer", use_llm=False)
+        self.assertEqual(
+            capability_resolve(self._state(operation_intent=created), tools=[CREATE_CUSTOMER])[
+                "execution_mode"
+            ],
+            "mcp",
+        )
+        self.assertEqual(
+            capability_resolve(self._state(operation_intent=created), tools=[GET_ORDER])[
+                "execution_mode"
+            ],
+            "deny",
+        )
+        deleted = extract_operation("Remove inactive customers", use_llm=False)
+        self.assertEqual(deleted["operation"], "DELETE")
+        self.assertEqual(
+            capability_resolve(self._state(operation_intent=deleted), tools=[DELETE_CUSTOMER])[
+                "execution_mode"
+            ],
+            "mcp",
+        )
+        self.assertEqual(
+            capability_resolve(self._state(operation_intent=deleted), tools=[])["execution_mode"],
+            "deny",
+        )
+
+    def test_capability_route_never_sends_writes_to_sql(self):
+        state = self._state(execution_mode="deny")
+        self.assertEqual(route_after_capability(state), "refuse")
+        state = self._state(execution_mode="sql")
+        self.assertEqual(route_after_capability(state), "planner")
+        state = self._state(execution_mode="mcp")
+        self.assertEqual(route_after_capability(state), "mcp")
+
+    def test_mcp_failure_does_not_route_to_sql(self):
+        from agent.mcp.client import MCPClientError
+        from agent.nodes.mcp_executor import mcp_execute
+        from unittest.mock import patch
+
+        state = self._state(
+            execution_mode="mcp",
+            mcp_server_url="https://example.com/mcp",
+            mcp_result={"tool": "update_order_status", "arguments": {"order_id": "123"}},
+            routing={"mode": "mcp", "tool": "update_order_status"},
+        )
+        with patch("agent.nodes.mcp_executor.call_tool", side_effect=MCPClientError("boom")):
+            result = mcp_execute(state)
+        self.assertEqual(result["answer_kind"], "mcp_failed")
+        failed = self._state(
+            execution_result=result["execution_result"],
+            execution_mode="deny",
+        )
+        self.assertEqual(route_after_mcp_execute(failed), "refuse")
+        self.assertNotEqual(route_after_mcp_execute(failed), "planner")
+
+    def test_redact_hides_secrets(self):
+        from agent.mcp.redact import redact
+
+        hidden = redact({"token": "abc", "order_id": "123"})
+        self.assertEqual(hidden["token"], "[redacted]")
+        self.assertEqual(hidden["order_id"], "123")
