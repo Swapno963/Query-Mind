@@ -1,0 +1,26 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - gemini_api
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        env:
+          DJANGO_SECRET_KEY: test-secret-not-for-production
+          DJANGO_DEBUG: "true"
+        run: uv run python manage.py test chat.tests connections.tests --verbosity=1

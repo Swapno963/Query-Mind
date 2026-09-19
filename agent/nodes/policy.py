@@ -6,7 +6,8 @@ from agent.state import QueryMindState
 
 def policy_check(state: QueryMindState) -> dict[str, Any]:
     intent = state.operation_intent or {}
-    policy = decide(intent.get("operation"))
+    surface = getattr(state, "product_surface", "") or ""
+    policy = decide(intent.get("operation"), product_surface=surface)
     routing = {
         **(state.routing or {}),
         "operation": policy["operation"],

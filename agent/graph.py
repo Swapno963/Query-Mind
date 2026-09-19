@@ -1,7 +1,6 @@
 from langgraph.graph import END, START, StateGraph
 
 from .state import QueryMindState
-
 from .nodes.planner import planner
 from .nodes.schema import schema, schema_shared_by_user
 from .nodes.sql_generator import sql_generator, sql_generator_on_premise
@@ -17,9 +16,15 @@ from .nodes.classify import classify_operation
 from .nodes.policy import policy_check
 from .nodes.capability import capability_resolve
 from .nodes.mcp_executor import mcp_execute
+from .nodes.converse import converse_answer
+
+GRAPH_RECURSION_LIMIT = 40
+GRAPH_RUN_CONFIG = {"recursion_limit": GRAPH_RECURSION_LIMIT}
 
 
 def route_after_classify(state: QueryMindState) -> str:
+    if state.execution_mode == "converse":
+        return "converse"
     if state.execution_mode in {"clarify", "deny"} or state.status == "failed":
         return "refuse"
     return "policy"
@@ -120,11 +125,23 @@ def route_after_on_premise_execution(state: QueryMindState) -> str:
     return "error"
 
 
+def retry_budget_used(state: QueryMindState) -> int:
+    return max(int(state.retry_count or 0), int(state.sql_attempts or 0))
+
+
+def retries_exhausted(state: QueryMindState) -> bool:
+    return retry_budget_used(state) >= int(state.max_retries or 3)
+
+
 def route_after_on_premise_error_analysis(state: QueryMindState) -> str:
     analysis = state.error_analysis or {}
     action = analysis.get("action") or "end"
-    if (state.retry_count or 0) >= (state.max_retries or 3):
+    if retries_exhausted(state):
         return "end"
+    if action == "schema" and (
+        analysis.get("schema_retried") and (state.retry_count or 0) > 1
+    ):
+        action = "repair"
     if action == "repair":
         return "repair"
     if action == "schema":
@@ -137,12 +154,13 @@ def _add_control_nodes(workflow):
     workflow.add_node("policy_check", policy_check)
     workflow.add_node("capability_resolve", capability_resolve)
     workflow.add_node("mcp_execute", mcp_execute)
+    workflow.add_node("converse", converse_answer)
     workflow.add_node("refuse", refuse_answer)
     workflow.add_edge(START, "classify_operation")
     workflow.add_conditional_edges(
         "classify_operation",
         route_after_classify,
-        {"policy": "policy_check", "refuse": "refuse"},
+        {"policy": "policy_check", "refuse": "refuse", "converse": "converse"},
     )
     workflow.add_conditional_edges(
         "policy_check",
@@ -250,6 +268,7 @@ def _build_chat_graph(*, on_premise: bool):
     )
 
     workflow.add_edge("result_formatter", END)
+    workflow.add_edge("converse", END)
     workflow.add_edge("refuse", END)
 
     return workflow.compile()
@@ -304,6 +323,7 @@ def build_api_query_graph():
 
     workflow.add_edge("sql_repair", "sql_validator")
     workflow.add_edge("result_formatter", END)
+    workflow.add_edge("converse", END)
     workflow.add_edge("refuse", END)
 
     return workflow.compile()

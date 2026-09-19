@@ -5,6 +5,8 @@ from django.contrib import admin
 from django.contrib.staticfiles.views import serve as serve_static
 from django.urls import include, path, re_path
 
+import DjangoForAI.admin  # noqa: F401  # QueryMind staff branding
+
 from DjangoForAI.health import health_check
 from chat.urls import (
     api_portal_urlpatterns,

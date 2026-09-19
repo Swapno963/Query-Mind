@@ -832,6 +832,8 @@ class PromptGenerator:
 
     - Only use tables and columns listed in the provided relevant database schema.
     - Never invent tables, columns, relationships, or values.
+    - Never write SELECT * or table.*. Name every column QueryMind may use.
+    - Limit result rows to what the user asked, and never more than 100. If they did not ask for a number, use LIMIT 100 (or the dialect equivalent such as FETCH FIRST / TOP).
     - Use foreign-key relationships provided in the schema when JOINs are required.
     - Follow the business definitions exactly.
     - Use previous conversation context only when it is relevant to the current question.

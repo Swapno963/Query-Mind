@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
 
-from agent.graph import build_api_query_graph
+from agent.graph import GRAPH_RUN_CONFIG, build_api_query_graph
 from agent.state import QueryMindState
 from chat.api.chat_service import ChatService
 from chat.api.errors import api_error
@@ -22,7 +22,7 @@ from chat.models import ApiAccessRequest, ApiKey, Conversation, Message
 from chat.permissions import IsApiKeyAuthenticated
 from chat.services import ConversationService
 from chat.organizations import is_org_admin, mcp_server_url_for, organization_for
-from chat.product import org_api_enabled
+from chat.product import org_api_enabled, org_llm_backend
 from chat.ui import KIND_API, api_ready, get_or_create_workspace as create_workspace, workspace_for
 from connections.models import WorkspaceConnection
 from connections.services.catalog import (
@@ -294,7 +294,16 @@ class WorkspaceView(APIView):
         return Response(workspace_payload(workspace))
 
 
-def _run_sql_generation(user, content: str):
+def _mcp_headers_from_request(request) -> dict[str, str]:
+    token = request.headers.get("X-MCP-Authorization") or request.headers.get("x-mcp-authorization") or ""
+    if not token:
+        return {}
+    if not token.lower().startswith("bearer "):
+        token = f"Bearer {token}"
+    return {"Authorization": token}
+
+
+def _run_sql_generation(user, content: str, conversation_context: str = "", mcp_headers=None):
     workspace = workspace_for(user, KIND_API)
     mcp_url = mcp_server_url_for(user)
     if not api_ready(workspace) and not mcp_url:
@@ -322,9 +331,12 @@ def _run_sql_generation(user, content: str):
         schema_text=(workspace.schema_text if workspace else "") or "",
         engine=getattr(workspace, "engine", "postgres") if workspace else "postgres",
         mcp_server_url=mcp_url,
-        llm_backend="online",
+        mcp_headers=mcp_headers or {},
+        conversation_context=conversation_context or "",
+        llm_backend=org_llm_backend(organization_for(user)),
+        product_surface="api",
     )
-    final_state = build_api_query_graph().invoke(state)
+    final_state = build_api_query_graph().invoke(state, config=GRAPH_RUN_CONFIG)
     if not isinstance(final_state, dict):
         final_state = {
             "sql": getattr(final_state, "sql", None),
@@ -337,6 +349,21 @@ def _run_sql_generation(user, content: str):
             "final_answer": getattr(final_state, "final_answer", None),
             "routing": getattr(final_state, "routing", {}) or {},
         }
+    if final_state.get("execution_mode") == "converse" or final_state.get("answer_kind") == "conversation":
+        answer = (final_state.get("final_answer") or "").strip() or (
+            "I'm QueryMind. Ask about the tables you allowed whenever you're ready."
+        )
+        return {
+            "id": f"msg_{user_message.id}",
+            "type": "message",
+            "role": "assistant",
+            "stop_reason": "conversation",
+            "user_message_id": user_message.id,
+            "conversation_id": conversation.id,
+            "conversation_created": created,
+            "routing": final_state.get("routing") or {},
+            "content": [{"type": "text", "text": answer}],
+        }, None
     if final_state.get("execution_mode") == "mcp" or (final_state.get("routing") or {}).get("mode") == "mcp":
         answer = (final_state.get("final_answer") or "").strip()
         if not answer:
@@ -351,6 +378,7 @@ def _run_sql_generation(user, content: str):
             "conversation_id": conversation.id,
             "conversation_created": created,
             "routing": final_state.get("routing") or {},
+            "execution_result": final_state.get("execution_result") or {},
             "content": [{"type": "text", "text": answer}],
         }
         return payload, None
@@ -358,6 +386,7 @@ def _run_sql_generation(user, content: str):
         "needs_clarification",
         "unsupported_operation",
         "mcp_failed",
+        "needs_parameters",
     }:
         message = (
             final_state.get("final_answer")
@@ -373,6 +402,7 @@ def _run_sql_generation(user, content: str):
             "conversation_id": conversation.id,
             "conversation_created": created,
             "routing": final_state.get("routing") or {},
+            "execution_result": final_state.get("execution_result") or {},
             "content": [{"type": "text", "text": message}],
             "error": {
                 "type": final_state.get("answer_kind"),
@@ -428,6 +458,8 @@ class MessagesView(APIView):
         payload, error = _run_sql_generation(
             request.user,
             serializer.validated_data["content"],
+            serializer.validated_data.get("conversation_context") or "",
+            _mcp_headers_from_request(request),
         )
         if error:
             return error
@@ -489,6 +521,8 @@ class ChatAPIView(APIView):
         payload, error = _run_sql_generation(
             request.user,
             serializer.validated_data["message"],
+            "",
+            _mcp_headers_from_request(request),
         )
         if error:
             return error

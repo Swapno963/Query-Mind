@@ -1,0 +1,4 @@
+<nav class="docs-switch" aria-label="Documentation">
+    <a class="docs-switch-link{% if docs_kind == 'api' %} is-active{% endif %}" href="{% url 'developers' %}">API</a>
+    <a class="docs-switch-link{% if docs_kind == 'mcp' %} is-active{% endif %}" href="{% url 'mcp_docs' %}">MCP</a>
+</nav>

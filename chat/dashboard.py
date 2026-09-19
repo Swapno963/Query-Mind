@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from datetime import timedelta
 
 from django.conf import settings
@@ -14,9 +15,10 @@ from chat.models import (
     ApiAccessRequest,
     ApiKey,
     Conversation,
+    Organization,
     OrganizationMembership,
 )
-from chat.organizations import organization_for
+from chat.organizations import is_org_admin, is_platform_admin, organization_for
 from chat.ui import (
     KIND_API,
     KIND_CHAT,
@@ -30,9 +32,10 @@ from chat.product import org_api_enabled, org_chat_enabled
 
 
 def post_login_redirect_name(user) -> str:
-    from chat.organizations import is_org_admin, organization_for
     from chat.product import home_url_name, next_setup_step
 
+    if is_platform_admin(user):
+        return "dashboard"
     org = organization_for(user)
     if is_org_admin(user) and next_setup_step(org):
         return "onboarding"
@@ -42,6 +45,111 @@ def post_login_redirect_name(user) -> str:
 
 
 def dashboard_context(request):
+    if is_platform_admin(request.user):
+        return _platform_dashboard_context(request)
+    return _org_dashboard_context(request)
+
+
+def _platform_dashboard_context(request):
+    pending_api = (
+        ApiAccessRequest.objects.filter(status=ApiAccessRequest.STATUS_PENDING)
+        .select_related("user")
+        .prefetch_related("user__org_memberships__organization")
+        .order_by("created_at")
+    )
+    pending_count = pending_api.count()
+    org_count = Organization.objects.count()
+    people_count = OrganizationMembership.objects.filter(is_active=True).count()
+    approved_api = ApiAccessRequest.objects.filter(
+        status=ApiAccessRequest.STATUS_APPROVED
+    ).count()
+    active_keys = ApiKey.objects.filter(revoked_at__isnull=True).count()
+    recent_questions = Conversation.objects.select_related("user").order_by("-updated_at")[:8]
+    stats = [
+        {
+            "label": "Organizations",
+            "value": str(org_count),
+            "hint": "Every QueryMind customer organization.",
+            "tone": "ok",
+        },
+        {
+            "label": "People",
+            "value": str(people_count),
+            "hint": "Active memberships across organizations.",
+        },
+        {
+            "label": "API access",
+            "value": str(pending_count),
+            "hint": f"{pending_count} waiting · {approved_api} approved · {active_keys} active keys",
+            "tone": "warn" if pending_count else "ok",
+        },
+        {
+            "label": "Questions",
+            "value": str(Conversation.objects.count()),
+            "hint": "Titles only. Message content stays with the person who asked.",
+        },
+    ]
+    actions = [
+        {
+            "title": "Approve API access",
+            "body": "People request keys from the API page. Approve them here before they can call QueryMind.",
+            "href": "dashboard",
+            "anchor": "api-requests",
+            "cta": "Review requests",
+            "icon": "bi-key",
+            "status": f"{pending_count} waiting" if pending_count else "None waiting",
+            "tone": "warn" if pending_count else "ok",
+        },
+        {
+            "title": "Staff admin",
+            "body": "Organizations, memberships, MCP URLs, and API keys.",
+            "href": "admin:index",
+            "cta": "Open staff admin",
+            "icon": "bi-shield-lock",
+            "status": "Super administrator",
+            "tone": "ok",
+        },
+        {
+            "title": "Create an API key",
+            "body": "Do not mint a superuser key for ServeEasy. Sign in as an organization admin, set mcp_server_url to ServeEasy /mcp, then mint that user's key.",
+            "href": "developers",
+            "cta": "Open API",
+            "icon": "bi-code-slash",
+            "status": "Org key required",
+            "tone": "warn",
+        },
+    ]
+    alerts = []
+    if pending_count:
+        alerts.append(
+            {
+                "title": f"{pending_count} API access request{'s' if pending_count != 1 else ''} waiting",
+                "body": "Approve a request before that person can create API keys.",
+                "href": "dashboard",
+                "label": "Review below",
+                "anchor": "api-requests",
+            }
+        )
+    return product_context(
+        request,
+        {
+            "active_nav": "dashboard",
+            "dash_org": SimpleNamespace(name="QueryMind"),
+            "dash_platform": True,
+            "dash_stats": stats,
+            "dash_actions": actions,
+            "dash_alerts": alerts,
+            "dash_questions": recent_questions,
+            "dash_pending_api": pending_api,
+            "dash_allowed_tables": [],
+            "dash_allowed_more": 0,
+            "dash_readonly": False,
+            "dash_api_workspace": None,
+        },
+    )
+
+
+def _org_dashboard_context(request):
     org = organization_for(request.user)
     members = OrganizationMembership.objects.filter(organization=org).select_related(
         "user"
@@ -214,7 +322,7 @@ def _admin_actions(*, chat_on, api_on, data_ready, api_ready, mcp_set, pending_a
                 "body": "QueryMind reads live table names from your database. You choose what it may use.",
                 "href": "onboarding",
                 "query": "track=chat",
-                "cta": "Set up data" if not data_ready else "Change access",
+                "cta": "Set up data" if not data_ready else "Change connection",
                 "icon": "bi-sliders",
                 "status": "Needs setup" if not data_ready else "Connected",
                 "tone": "warn" if not data_ready else "ok",
@@ -223,9 +331,9 @@ def _admin_actions(*, chat_on, api_on, data_ready, api_ready, mcp_set, pending_a
         actions.append(
             {
                 "title": "Review allowed tables",
-                "body": "See the allow-list people in this organization can ask against.",
+                "body": "Give or remove table and column permission on this page. You do not need to restart setup.",
                 "href": "data_access",
-                "cta": "Open your data",
+                "cta": "Edit table access" if data_ready else "Open your data",
                 "icon": "bi-database",
                 "status": "Ready" if data_ready else "Empty",
                 "tone": "ok" if data_ready else "muted",

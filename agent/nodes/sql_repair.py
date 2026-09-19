@@ -156,7 +156,9 @@ REPAIR RULES:
 2. Do NOT return Markdown or ```sql.
 3. Only generate a single SELECT.
 4. Use only tables and columns in the schema.
-5. Preserve the user's original intent and grain.
+5. Never write SELECT * or table.*. Name every allowed column.
+6. Limit result rows to what the user asked, and never more than 100.
+7. Preserve the user's original intent and grain.
 
 Return only the repaired SQL.
 """.strip()

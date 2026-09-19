@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
+
+from agent.mcp.redact import redact
 
 
 class MCPClientError(Exception):
@@ -32,38 +35,71 @@ def _tool_to_dict(tool: Any) -> dict[str, Any]:
     }
 
 
-async def _list_tools(url: str) -> list[dict[str, Any]]:
-    from mcp import Client
+def _clean_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    cleaned: dict[str, str] = {}
+    for key, value in (headers or {}).items():
+        if value:
+            cleaned[str(key)] = str(value)
+    return cleaned
 
-    async with Client(url) as client:
+
+async def _with_client(url: str, headers: dict[str, str] | None, callback):
+    from mcp import Client
+    from mcp.client.streamable_http import streamable_http_client
+    from mcp.shared._httpx_utils import create_mcp_http_client
+
+    clean = _clean_headers(headers)
+    if not clean:
+        async with Client(url) as client:
+            return await callback(client)
+    http = create_mcp_http_client(headers=clean)
+    async with http:
+        async with Client(streamable_http_client(url, http_client=http)) as client:
+            return await callback(client)
+
+
+async def _list_tools(url: str, headers: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    async def callback(client):
         result = await client.list_tools()
-    tools = getattr(result, "tools", None) or []
-    return [_tool_to_dict(tool) for tool in tools]
+        tools = getattr(result, "tools", None) or []
+        return [_tool_to_dict(tool) for tool in tools]
+
+    return await _with_client(url, headers, callback)
 
 
-async def _call_tool(url: str, name: str, arguments: dict[str, Any] | None) -> Any:
-    from mcp import Client
-
-    async with Client(url) as client:
+async def _call_tool(
+    url: str,
+    name: str,
+    arguments: dict[str, Any] | None,
+    headers: dict[str, str] | None = None,
+) -> Any:
+    async def callback(client):
         return await client.call_tool(name, arguments or {})
 
+    return await _with_client(url, headers, callback)
 
-def list_tools(url: str) -> list[dict[str, Any]]:
+
+def list_tools(url: str, headers: dict[str, str] | None = None) -> list[dict[str, Any]]:
     if not url:
         return []
     try:
-        return _run(_list_tools(url))
+        return _run(_list_tools(url, headers))
     except MCPClientError:
         raise
     except Exception as exc:
         raise MCPClientError("Could not list MCP tools.", detail=str(exc)) from exc
 
 
-def call_tool(url: str, name: str, arguments: dict[str, Any] | None) -> Any:
+def call_tool(
+    url: str,
+    name: str,
+    arguments: dict[str, Any] | None,
+    headers: dict[str, str] | None = None,
+) -> Any:
     if not url:
         raise MCPClientError("No MCP server is configured.")
     try:
-        return _run(_call_tool(url, name, arguments or {}))
+        return _run(_call_tool(url, name, arguments or {}, headers))
     except MCPClientError:
         raise
     except Exception as exc:
@@ -85,14 +121,27 @@ def result_to_rows(result: Any) -> list[dict[str, Any]]:
     for item in getattr(result, "content", None) or []:
         text = getattr(item, "text", None)
         if text:
-            rows.append({"result": text})
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, dict):
+                rows.append(parsed)
+            else:
+                rows.append({"result": text})
             continue
         data = getattr(item, "data", None)
         if data is not None:
             rows.append(data if isinstance(data, dict) else {"value": data})
     if getattr(result, "isError", False) or getattr(result, "is_error", False):
-        raise MCPClientError(
-            "MCP tool returned an error.",
-            detail=str(rows[0].get("result") if rows else ""),
-        )
+        status = rows[0].get("status") if rows else ""
+        if status not in {"needs_confirmation", "needs_parameters", "ambiguous"}:
+            raise MCPClientError(
+                "MCP tool returned an error.",
+                detail=str(rows[0].get("result") if rows else ""),
+            )
     return rows or [{"result": "ok"}]
+
+
+def redacted_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    return redact(_clean_headers(headers))

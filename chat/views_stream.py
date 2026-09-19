@@ -3,12 +3,16 @@ import random
 import time
 
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.serializers.json import DjangoJSONEncoder
 from django.http import HttpResponse, StreamingHttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.generic import View
 from django.views.generic.detail import SingleObjectMixin
 
-from agent.graph import build_on_premise_graph, build_online_graph
+from langgraph.errors import GraphRecursionError
+
+from agent.graph import GRAPH_RUN_CONFIG, build_on_premise_graph, build_online_graph
+from agent.nodes.result_formatter import deterministic_result_answer
 from agent.state import QueryMindState
 from chat.organizations import mcp_server_url_for, organization_for
 from chat.product import org_chat_enabled, org_llm_backend
@@ -73,62 +77,85 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
             engine=workspace.engine if workspace else "postgres",
             mcp_server_url=mcp_url,
             llm_backend=backend,
+            product_surface="chat",
         )
 
         def generate():
             STATUS_MESSAGES = {
                 "classify_operation": "Understanding what you want to do…",
+                "converse": "Replying…",
                 "policy_check": "Checking what QueryMind is allowed to do…",
                 "capability_resolve": "Checking available tools…",
                 "mcp_execute": "Running a business operation…",
                 "planner": "Understanding your question…",
-                "schema": "Looking at your data…",
-                "sql_generator": "Looking at your data…",
+                "schema": "Choosing which tables to use…",
+                "sql_generator": "Writing a lookup…",
                 "sql_validator": "Checking the question is safe…",
                 "explain_sql": "Checking the query plan…",
                 "sql_critic": "Checking the question matches your data…",
-                "sql_repair": "Checking the question is safe…",
+                "sql_repair": "Fixing the lookup…",
                 "sql_executor": "Fetching results…",
                 "result_formatter": "Writing your answer…",
                 "refuse": "Could not complete that request…",
             }
             outcome = {}
+            emitted_sql = False
+            emitted_rows = False
             try:
                 graph = (
                     build_on_premise_graph()
                     if backend == "local"
                     else build_online_graph()
                 )
-                for event in graph.stream(state):
+                for event in graph.stream(state, config=GRAPH_RUN_CONFIG):
                     first_key = next(iter(event.keys()))
                     payload = event.get(first_key) or {}
                     if isinstance(payload, dict):
                         outcome.update(payload)
-                    yield _sse(
-                        "status",
-                        STATUS_MESSAGES.get(first_key, "Processing your request…"),
-                    )
+                    status = STATUS_MESSAGES.get(first_key)
+                    if status:
+                        yield _sse("status", status)
+                    if first_key == "sql_executor" and isinstance(payload, dict):
+                        sql = payload.get("sql") or outcome.get("sql") or ""
+                        if sql and not emitted_sql:
+                            yield _sse("sql", sql)
+                            emitted_sql = True
+                        execution = payload.get("execution_result") or {}
+                        if execution.get("success") and not emitted_rows:
+                            rows = execution.get("rows") or []
+                            yield _sse("rows", rows=rows)
+                            yield _sse(
+                                "meta",
+                                tables=len((workspace.allowed_tables if workspace else None) or []),
+                                rows=len(rows),
+                            )
+                            emitted_rows = True
 
                 sql = outcome.get("sql") or ""
-                if sql:
+                if sql and outcome.get("answer_kind") != "conversation" and not emitted_sql:
                     yield _sse("sql", sql)
+                    emitted_sql = True
 
                 execution = outcome.get("execution_result") or {}
                 kind = outcome.get("answer_kind") or execution.get("kind")
                 rows = execution.get("rows")
-                if execution.get("success"):
+                if execution.get("success") and not emitted_rows:
                     yield _sse("rows", rows=rows or [])
                     yield _sse(
                         "meta",
-                        tables=len(workspace.allowed_tables or []),
+                        tables=len((workspace.allowed_tables if workspace else None) or []),
                         rows=len(rows or []),
                     )
+                    emitted_rows = True
                 elif kind == "unavailable":
                     yield _sse("unavailable")
-                elif kind == "zero_rows":
+                elif kind == "zero_rows" and not emitted_rows:
                     yield _sse("rows", rows=[])
+                    emitted_rows = True
 
                 final_answer = (outcome.get("final_answer") or "").strip()
+                if not final_answer and execution.get("success"):
+                    final_answer = deterministic_result_answer(rows or [])
                 if kind in {"unavailable", "connection_failed", "error"} and not final_answer:
                     final_answer = (
                         "QueryMind could not read that from your allowed tables."
@@ -175,8 +202,20 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
                     yield _sse("result", token)
                     time.sleep(random.uniform(0.03, 0.08))
                 yield _sse("done", timestamp=timestamp_str)
+            except GraphRecursionError:
+                yield _sse(
+                    "error",
+                    "QueryMind could not finish this answer. Try asking again in a moment.",
+                    code="error",
+                    detail="The lookup retried too many times.",
+                )
             except Exception as exc:
-                yield _sse("error", str(exc), code="error", detail=str(exc))
+                yield _sse(
+                    "error",
+                    "QueryMind could not finish this answer. Try asking again in a moment.",
+                    code="error",
+                    detail=_public_error_detail(exc),
+                )
 
         response = StreamingHttpResponse(
             generate(),
@@ -213,7 +252,16 @@ def _sse(event_type, content=None, **extra):
     payload = {"type": event_type, **extra}
     if content is not None:
         payload["content"] = content
-    return f"data: {json.dumps(payload)}\n\n"
+    return f"data: {json.dumps(payload, cls=DjangoJSONEncoder)}\n\n"
+
+
+def _public_error_detail(exc: Exception) -> str:
+    message = str(exc)
+    if "JSON serializable" in message or "Object of type" in message:
+        return ""
+    if len(message) > 180:
+        return ""
+    return message
 
 
 def _sse_error_stream(code, message):

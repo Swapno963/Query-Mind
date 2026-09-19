@@ -1,0 +1,10 @@
+{% extends "admin/login.html" %}
+
+{% block content %}
+<p class="qm-login-hint">
+    This page is for QueryMind <strong>superusers</strong> (staff admin).
+    Organization administrators sign in on the product login.
+    Seeded platform account: <code>admin@querymind.local</code>.
+</p>
+{{ block.super }}
+{% endblock %}

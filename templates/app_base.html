@@ -32,21 +32,31 @@
             <a class="nav-link {% if active_nav == 'api' %}active{% endif %}" href="{% url 'developers' %}">
                 <i class="bi bi-code-slash"></i> API
             </a>
+            <a class="nav-link {% if active_nav == 'mcp' %}active{% endif %}" href="{% url 'mcp_docs' %}">
+                <i class="bi bi-plug"></i> MCP
+            </a>
             {% endif %}
-            {% if is_org_admin %}
+            {% if is_org_admin or is_platform_admin %}
             <a class="nav-link {% if active_nav == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">
                 <i class="bi bi-grid-1x2"></i> Dashboard
             </a>
+            {% endif %}
+            {% if is_org_admin and not is_platform_admin %}
             <a class="nav-link {% if active_nav == 'team' %}active{% endif %}" href="{% url 'team' %}">
                 <i class="bi bi-people"></i> Team
             </a>
             {% endif %}
-            {% if chat_enabled and not data_ready and is_org_admin %}
+            {% if is_platform_admin %}
+            <a class="nav-link" href="{% url 'admin:index' %}">
+                <i class="bi bi-shield-lock"></i> Staff admin
+            </a>
+            {% endif %}
+            {% if chat_enabled and not data_ready and is_org_admin and not is_platform_admin %}
             <a class="nav-link {% if active_nav == 'onboarding' %}active{% endif %}" href="{% url 'onboarding' %}?track=chat">
                 <i class="bi bi-sliders"></i> Set up your data
             </a>
             {% endif %}
-            {% if api_enabled and not api_data_ready and is_org_admin %}
+            {% if api_enabled and not api_data_ready and is_org_admin and not is_platform_admin %}
             <a class="nav-link {% if active_nav == 'onboarding' %}active{% endif %}" href="{% url 'onboarding' %}?track=api">
                 <i class="bi bi-sliders"></i> Set up API data
             </a>
@@ -80,7 +90,7 @@
             <div class="account-link">
                 {{ account_name|default:"Signed in" }}
                 <span>
-                    {% if is_org_admin %}Administrator{% else %}User{% endif %}
+                    {% if is_platform_admin %}Super administrator{% elif is_org_admin %}Administrator{% else %}User{% endif %}
                     {% if organization %} · {{ organization.name }}{% endif %}
                 </span>
             </div>

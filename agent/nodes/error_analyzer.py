@@ -14,18 +14,30 @@ def error_analyzer(state: QueryMindState) -> dict[str, Any]:
     Analyze a SQL/database execution error and determine the
     recovery strategy.
 
-    This node does NOT:
-    - execute SQL
-    - generate SQL
-    - repair SQL
-    - call Ollama
-    - modify the database
-    - decide the graph's next node
-
-    It only analyzes the error and stores a recovery decision
-    in QueryMindState.
+    This node does NOT decide the graph's next node. It only stores
+    a recovery decision. Schema refresh is attempted at most once;
+    repeating it with the same allow-list loops the chat UI.
     """
+    result = _classify_error(state)
+    analysis = dict(result.get("error_analysis") or {})
+    action = analysis.get("action") or "end"
+    previous = state.error_analysis or {}
+    retry_count = int(state.retry_count or 0)
+    if action == "schema" and previous.get("schema_retried"):
+        analysis["action"] = "repair"
+        action = "repair"
+    if action == "schema":
+        analysis["schema_retried"] = True
+    elif previous.get("schema_retried"):
+        analysis["schema_retried"] = True
+    if action in {"repair", "schema"}:
+        retry_count += 1
+        result["retry_count"] = retry_count
+    result["error_analysis"] = analysis
+    return result
 
+
+def _classify_error(state: QueryMindState) -> dict[str, Any]:
     error = (state.database_error or "").strip()
 
     # ============================================================
@@ -50,7 +62,7 @@ def error_analyzer(state: QueryMindState) -> dict[str, Any]:
     # 2. PostgreSQL schema-related errors
     # ============================================================
 
-    if "column" in error_lower and "does not exist" in error_lower:
+    if _is_missing_column(error_lower):
 
         return {
             "error_analysis": {
@@ -66,7 +78,7 @@ def error_analyzer(state: QueryMindState) -> dict[str, Any]:
             "status": "running",
         }
 
-    if "relation" in error_lower and "does not exist" in error_lower:
+    if _is_missing_table(error_lower):
 
         return {
             "error_analysis": {
@@ -266,3 +278,20 @@ def error_analyzer(state: QueryMindState) -> dict[str, Any]:
         "current_node": "error_analyzer",
         "status": "running",
     }
+
+
+def _is_missing_column(error_lower: str) -> bool:
+    return (
+        ("column" in error_lower and "does not exist" in error_lower)
+        or "no such column" in error_lower
+        or "unknown column" in error_lower
+    )
+
+
+def _is_missing_table(error_lower: str) -> bool:
+    return (
+        ("relation" in error_lower and "does not exist" in error_lower)
+        or "no such table" in error_lower
+        or ("table" in error_lower and "doesn't exist" in error_lower)
+        or ("table" in error_lower and "does not exist" in error_lower)
+    )

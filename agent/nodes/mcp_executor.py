@@ -28,7 +28,7 @@ def mcp_execute(state: QueryMindState) -> dict[str, Any]:
             "status": "failed",
         }
     try:
-        raw = call_tool(url, str(tool), arguments)
+        raw = call_tool(url, str(tool), arguments, getattr(state, "mcp_headers", None))
         rows = result_to_rows(raw)
         columns = list(rows[0].keys()) if rows else []
         return {

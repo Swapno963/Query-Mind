@@ -12,7 +12,11 @@ from google.genai import types
 import re
 from rest_framework import status
 from rest_framework.response import Response
-from chat.constants import ERROR_MESSAGES, OLLAMA_CHAT_ENDPOINT, OLLAMA_MODEL
+from chat.constants import ERROR_MESSAGES, OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT
+
+
+class LLMUnavailable(Exception):
+    """Local or online model could not be reached."""
 
 
 class ChatService:
@@ -284,22 +288,17 @@ class ChatService:
     @staticmethod
     def ask_ai(prompt: str) -> str:
         try:
-            print("Request came to ai:")
             api_key = os.getenv("GEMINI_API_KEY")
-            print("GEMINI_API_KEY : ", api_key)
-            # 1. Increase read timeout to 30s to allow headroom for model generation
             client = genai.Client(
                 api_key=api_key,
+                http_options=types.HttpOptions(timeout=20000),
             )
-            # http_options=types.HttpOptions(timeout=30000),  # 30 seconds in ms
 
-            # 2. Stream response chunks to keep socket active
             response_stream = client.models.generate_content_stream(
                 model="gemini-3.6-flash",
                 contents=prompt,
             )
 
-            # Accumulate text chunks as they arrive over the wire
             full_text = "".join(chunk.text for chunk in response_stream if chunk.text)
             return full_text
 
@@ -325,10 +324,14 @@ class ChatService:
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
 
-            with httpx.Client(timeout=100.0) as client:
+            with httpx.Client(
+                timeout=httpx.Timeout(
+                    connect=2.0, read=OLLAMA_TIMEOUT, write=5.0, pool=5.0
+                )
+            ) as client:
                 with client.stream(
                     "POST",
-                    OLLAMA_CHAT_ENDPOINT,
+                    f"{os.getenv('OLLAMA_BASE_URL', OLLAMA_BASE_URL).rstrip('/')}/api/chat",
                     json={
                         "model": OLLAMA_MODEL,
                         "messages": messages,
@@ -354,17 +357,19 @@ class ChatService:
                             continue
             return full_response
 
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as exc:
+            raise LLMUnavailable("The local model is not reachable.") from exc
         except Exception as e:
             print("AI request failed:")
             print(f"Error type: {type(e).__name__}")
             print(f"Error message: {e}")
             traceback.print_exc()
-
-            return "Sorry, I couldn't process your request right now. Please try again later."
+            raise LLMUnavailable("The local model could not finish this request.") from e
 
     @staticmethod
     def ask_for_backend(prompt: str, backend: str = "local", **kwargs) -> str:
-        if (backend or "local").strip().lower() == "online":
+        chosen = (backend or "local").strip().lower()
+        if chosen == "online":
             return ChatService.ask_ai(prompt)
         return ChatService.ask_on_premise_ai(prompt, **kwargs)
 
@@ -513,11 +518,12 @@ def build_chat_response(conversation, user_message, result, created):
         try:
             from connections.services.sql_validation import ReadOnlySQLExecutor
 
-            ReadOnlySQLExecutor(
+            executor = ReadOnlySQLExecutor(
                 allowed_tables=allowed,
                 allowed_columns=allowed_columns,
                 engine=getattr(conversation.workspace, "engine", "postgres"),
-            ).validate(raw_sql)
+            )
+            raw_sql = executor.normalized_sql(raw_sql)
         except Exception as exc:
             is_fallback, fallback_reason = True, str(exc)
 

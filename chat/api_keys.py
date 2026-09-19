@@ -20,27 +20,42 @@ def generate_api_key() -> tuple[str, str, str]:
 def user_has_approved_api_access(user) -> bool:
     if not user or not user.is_authenticated:
         return False
+    from chat.organizations import is_platform_admin
+
+    if is_platform_admin(user):
+        return True
     return ApiAccessRequest.objects.filter(
         user=user,
         status=ApiAccessRequest.STATUS_APPROVED,
     ).exists()
 
 
-def set_org_api_access_status(*, org, request_id, status: str) -> ApiAccessRequest:
+def set_api_access_status(*, actor, request_id, status: str, org=None) -> ApiAccessRequest:
     if status not in {
         ApiAccessRequest.STATUS_APPROVED,
         ApiAccessRequest.STATUS_DENIED,
     }:
         raise ValueError("Invalid API access status.")
-    access = ApiAccessRequest.objects.filter(
-        pk=request_id,
-        user__org_memberships__organization=org,
-    ).first()
+    from chat.organizations import is_platform_admin
+
+    access = ApiAccessRequest.objects.filter(pk=request_id).first()
     if access is None:
         raise ApiAccessRequest.DoesNotExist
+    if not is_platform_admin(actor):
+        scoped = ApiAccessRequest.objects.filter(
+            pk=request_id,
+            user__org_memberships__organization=org,
+        ).first()
+        if scoped is None:
+            raise ApiAccessRequest.DoesNotExist
+        access = scoped
     access.status = status
     access.save(update_fields=["status", "updated_at"])
     return access
+
+
+def set_org_api_access_status(*, org, request_id, status: str) -> ApiAccessRequest:
+    return set_api_access_status(actor=None, request_id=request_id, status=status, org=org)
 
 
 def lookup_api_key(raw: str) -> ApiKey | None:

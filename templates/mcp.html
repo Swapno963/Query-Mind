@@ -1,0 +1,194 @@
+{% extends "app_base.html" %}
+
+{% block title %}MCP — QueryMind{% endblock %}
+
+{% block workspace %}
+<header class="page-header">
+    <div style="display:flex;align-items:center;gap:.75rem;">
+        <button class="mobile-menu-btn" type="button" data-sidebar-open aria-label="Open menu">
+            <i class="bi bi-list"></i>
+        </button>
+        <div>
+            <h1 class="page-title">MCP</h1>
+            <div class="page-meta">QueryMind is the MCP client. The restaurant JWT on the MCP server is the authority. QueryMind must not hide or invent tools.</div>
+        </div>
+    </div>
+    <div class="docs-header-actions">
+        {% include "includes/docs_switch.html" %}
+    </div>
+</header>
+<div class="page-body docs-body">
+    <div class="docs-layout">
+        <div class="docs-main">
+            <div class="review-card" id="overview">
+                <h2 class="page-title" style="margin-bottom:.5rem;">1. One client, one server URL</h2>
+                <p>An organization administrator saves the MCP server URL on Team. QueryMind then lists tools and calls them. ServeEasy’s URL is <code>/mcp</code>.</p>
+                <div class="docs-sample">
+                    <div>
+                        <div class="docs-sample-label">This organization</div>
+                        <pre class="docs-pre"><code>{% if mcp_server_url %}{{ mcp_server_url }}{% else %}Not set. Open Team and save the ServeEasy /mcp URL.{% endif %}</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Typical values</div>
+                        <pre class="docs-pre"><code># Local ServeEasy
+http://127.0.0.1:8001/mcp
+
+# Production ServeEasy
+http://easyserve.clustorflow.com/mcp</code></pre>
+                    </div>
+                </div>
+                <p class="page-meta"><a href="{% url 'team' %}">Open Team</a> to set <code>mcp_server_url</code>. Do not put a restaurant JWT in QueryMind settings — only the URL.</p>
+            </div>
+
+            <div class="review-card" id="auth">
+                <h2 class="page-title" style="margin-bottom:.5rem;">2. Forward the restaurant JWT</h2>
+                <p>Staff chat sends the ServeEasy access token as <code>X-MCP-Authorization</code>. QueryMind copies it to <code>Authorization: Bearer</code> on <code>tools/list</code> and <code>tools/call</code>. No restaurant token → the MCP server returns 401.</p>
+                <div class="docs-sample">
+                    <div>
+                        <div class="docs-sample-label">Request — ask with MCP</div>
+                        <pre class="docs-pre" data-lang="bash"><code>curl -X POST {{ api_origin }}/api/v1/messages/ \
+  --header "x-api-key: $QUERYMIND_API_KEY" \
+  --header "X-MCP-Authorization: Bearer $SERVEEASY_ACCESS" \
+  --header "content-type: application/json" \
+  --data '{
+    "content": "Show today's pending orders"
+  }'</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">What QueryMind sends to /mcp</div>
+                        <pre class="docs-pre" data-lang="http"><code>Authorization: Bearer $SERVEEASY_ACCESS
+Content-Type: application/json
+Accept: application/json</code></pre>
+                    </div>
+                </div>
+                <p class="page-meta">Mint the API key as the organization admin after the MCP URL is saved. Do not mint a Django superuser key for ServeEasy.</p>
+            </div>
+
+            <div class="review-card" id="list">
+                <h2 class="page-title" style="margin-bottom:.5rem;">3. tools/list is filtered by the server</h2>
+                <p>QueryMind uses whatever the MCP server returns. A waiter must not see <code>create_menu_item</code>. QueryMind has no restaurant-role allowlist.</p>
+                <div class="docs-sample">
+                    <div>
+                        <div class="docs-sample-label">JSON-RPC</div>
+                        <pre class="docs-pre" data-lang="json"><code>{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list",
+  "params": {}
+}</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Waiter catalog</div>
+                        <pre class="docs-pre" data-lang="json"><code>{
+  "result": {
+    "tools": [
+      {"name": "list_orders"},
+      {"name": "get_order"}
+    ]
+  }
+}</code></pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="review-card" id="call">
+                <h2 class="page-title" style="margin-bottom:.5rem;">4. tools/call is checked again</h2>
+                <p>Hiding a tool is not security. The MCP server must deny names that were not listed. QueryMind still calls the selected name; ServeEasy returns <code>permission_denied</code>.</p>
+                <div class="docs-sample">
+                    <div>
+                        <div class="docs-sample-label">Allowed call</div>
+                        <pre class="docs-pre" data-lang="json"><code>{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "list_orders",
+    "arguments": {"status": "PENDING", "date": "today"}
+  }
+}</code></pre>
+                    </div>
+                    <div>
+                        <div class="docs-sample-label">Waiter calling create_menu_item</div>
+                        <pre class="docs-pre" data-lang="json"><code>{
+  "ok": false,
+  "code": "permission_denied",
+  "message": "You do not have permission to do that."
+}</code></pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="review-card" id="roles">
+                <h2 class="page-title" style="margin-bottom:.5rem;">5. ServeEasy tools by job</h2>
+                <p>Least privilege is by restaurant role, not by counting functions. Guests have no staff MCP — they use ServeEasy’s public menu and order HTTP APIs.</p>
+                <div class="docs-table-wrap">
+                    <table class="docs-table">
+                        <thead>
+                            <tr>
+                                <th>Role</th>
+                                <th>MCP tools QueryMind should see</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Owner / admin</td>
+                                <td>All staff tools (orders, menu writes, status, pay)</td>
+                            </tr>
+                            <tr>
+                                <td>Waiter</td>
+                                <td><code>list_orders</code>, <code>get_order</code></td>
+                            </tr>
+                            <tr>
+                                <td>Chef</td>
+                                <td>Order reads + <code>update_order_status</code></td>
+                            </tr>
+                            <tr>
+                                <td>Cashier</td>
+                                <td>Order reads + <code>mark_order_paid</code></td>
+                            </tr>
+                            <tr>
+                                <td>Guest / diner</td>
+                                <td>None</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="review-card" id="writes">
+                <h2 class="page-title" style="margin-bottom:.5rem;">6. Write confirmation</h2>
+                <p>Menu writes, status, and mark paid return <code>needs_confirmation</code> and a <code>confirmation_id</code>. Treat that as a tool result, not a failure. Repeat the same arguments with <code>confirmed: true</code> and that id.</p>
+            </div>
+
+            <div class="review-card" id="tenant">
+                <h2 class="page-title" style="margin-bottom:.5rem;">7. Tenant scope</h2>
+                <p>The MCP server scopes data by <code>user.restaurant_id</code> on the JWT user, not only by role. QueryMind must not add a second permission table.</p>
+            </div>
+
+            <div class="review-card" id="dont">
+                <h2 class="page-title" style="margin-bottom:.5rem;">What not to do</h2>
+                <ul>
+                    <li>Do not run waiter-mcp, chef-mcp, … — one server, filtered catalog.</li>
+                    <li>Do not filter tools in QueryMind by restaurant role. ServeEasy JWT is the ACL.</li>
+                    <li>Do not rely on the LLM “knowing” it must not call admin tools.</li>
+                    <li>Do not advertise every tool and return 403. That wastes tokens and makes the model retry forbidden names.</li>
+                </ul>
+            </div>
+        </div>
+
+        <nav class="docs-toc" aria-label="On this page">
+            <h2>On this page</h2>
+            <a href="#overview">Server URL</a>
+            <a href="#auth">Restaurant JWT</a>
+            <div class="docs-toc-sub">
+                <a href="#list">tools/list</a>
+                <a href="#call">tools/call</a>
+                <a href="#roles">Tools by job</a>
+                <a href="#writes">Write confirmation</a>
+                <a href="#tenant">Tenant scope</a>
+                <a href="#dont">What not to do</a>
+            </div>
+        </nav>
+    </div>
+</div>
+{% endblock %}

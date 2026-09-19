@@ -18,6 +18,7 @@ class QueryMindState:
     routing: dict[str, Any] = field(default_factory=dict)
     mcp_result: dict[str, Any] = field(default_factory=dict)
     mcp_server_url: str = ""
+    mcp_headers: dict[str, str] = field(default_factory=dict)
     required_schema: list[str] = field(default_factory=list)
     plan: dict[str, Any] = field(default_factory=dict)
     grain: str = ""
@@ -49,6 +50,7 @@ class QueryMindState:
     retry_count: int = 0
     max_retries: int = 3
     llm_backend: str = "local"
+    product_surface: str = ""
 
     final_answer: str | None = None
     answer_kind: str | None = None

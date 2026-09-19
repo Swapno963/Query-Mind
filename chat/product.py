@@ -86,11 +86,7 @@ def selectable_products() -> tuple[str, ...]:
 def apply_product_mode(org, requested: str | None) -> str:
     mode = clamp_product_mode(requested)
     org.product_mode = mode
-    if mode == "api":
-        org.llm_backend = ""
-        org.save(update_fields=["product_mode", "llm_backend"])
-    else:
-        org.save(update_fields=["product_mode"])
+    org.save(update_fields=["product_mode"])
     return mode
 
 

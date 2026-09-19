@@ -10,7 +10,7 @@
         </button>
         <div>
             <h1 class="page-title">Your data</h1>
-            <div class="page-meta">QueryMind only answers from the tables you allow.</div>
+            <div class="page-meta">QueryMind only answers from the tables and columns you allow.</div>
         </div>
     </div>
     {% if profile.is_readonly_role %}
@@ -19,6 +19,11 @@
 </header>
 <div class="page-body">
     <div class="data-layout">
+        {% if messages %}
+        {% for message in messages %}
+        <p class="alert {% if message.tags == 'error' %}alert-warning{% else %}alert-success{% endif %}">{{ message }}</p>
+        {% endfor %}
+        {% endif %}
         {% if data_ready %}
         <div class="review-card">
             <div class="data-summary">
@@ -28,6 +33,42 @@
             </div>
             <p style="margin:1rem 0 0;color:var(--muted);">{{ profile.business }}</p>
         </div>
+        {% if is_org_admin %}
+        <form class="table-list" method="post" action="{% url 'data_access' %}" id="data-access-form">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="save_access">
+            <h2 class="page-title" style="margin-bottom:0.6rem;">Allowed tables and columns</h2>
+            <p class="page-meta" style="margin-bottom:1rem;">Check a table and the columns chat may read. Uncheck to remove permission. This page does not restart setup.</p>
+            {% for table in profile.tables %}
+            <div class="table-row {% if not table.allowed %}excluded{% endif %}" data-table-row>
+                <div style="flex:1;">
+                    <label>
+                        <input type="checkbox" name="allowed_tables" value="{{ table.name }}" data-table-toggle {% if table.allowed %}checked{% endif %}>
+                        <strong>{{ table.name }}</strong>
+                    </label>
+                    <div class="page-meta">{{ table.description }}</div>
+                    {% if table.all_columns %}
+                    <div class="column-picks">
+                        {% for column in table.all_columns %}
+                        <label class="page-meta">
+                            <input type="checkbox" name="allowed_columns" value="{{ table.name }}.{{ column }}" data-table-column="{{ table.name }}" {% if column in table.allowed_column_set %}checked{% endif %}>
+                            {{ column }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                <span class="chip {% if table.allowed %}chip-success{% else %}chip-muted{% endif %}">
+                    {% if table.allowed %}Allowed{% else %}Unavailable{% endif %}
+                </span>
+            </div>
+            {% endfor %}
+            <div class="wizard-nav" style="margin-top:1.2rem;">
+                <button class="btn btn-primary" type="submit">Save access</button>
+                <a class="btn btn-secondary" href="{% url 'onboarding' %}?track=chat">Change database connection</a>
+            </div>
+        </form>
+        {% else %}
         <div class="table-list">
             <h2 class="page-title" style="margin-bottom:0.6rem;">Allowed tables</h2>
             {% for table in profile.tables %}
@@ -44,9 +85,8 @@
                 </span>
             </div>
             {% endfor %}
+            <p class="page-meta">Your administrator manages table and column permission.</p>
         </div>
-        {% if is_org_admin %}
-        <p><a class="btn btn-secondary" href="{% url 'onboarding' %}?track=chat">Change access</a></p>
         {% endif %}
         {% else %}
         <div class="empty-setup" style="margin:0;">
@@ -66,4 +106,36 @@
         {% endif %}
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{% if is_org_admin and data_ready %}
+<script>
+(function () {
+    const form = document.getElementById("data-access-form");
+    if (!form) return;
+    form.querySelectorAll("[data-table-toggle]").forEach(function (toggle) {
+        toggle.addEventListener("change", function () {
+            const name = toggle.value;
+            form.querySelectorAll('input[data-table-column="' + name + '"]').forEach(function (box) {
+                box.checked = toggle.checked;
+            });
+            const row = toggle.closest("[data-table-row]");
+            if (row) row.classList.toggle("excluded", !toggle.checked);
+        });
+    });
+    form.querySelectorAll("[data-table-column]").forEach(function (box) {
+        box.addEventListener("change", function () {
+            const name = box.getAttribute("data-table-column");
+            const columns = Array.from(form.querySelectorAll('input[data-table-column="' + name + '"]'));
+            const tableBox = form.querySelector('input[data-table-toggle][value="' + name + '"]');
+            if (!tableBox) return;
+            tableBox.checked = columns.some(function (item) { return item.checked; });
+            const row = tableBox.closest("[data-table-row]");
+            if (row) row.classList.toggle("excluded", !tableBox.checked);
+        });
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}

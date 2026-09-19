@@ -7,6 +7,7 @@ from agent.operation import (
     ACTION,
     CREATE,
     DELETE,
+    IGNORED_PARAMS,
     PARAM_ALIASES,
     READ,
     UPDATE,
@@ -49,6 +50,9 @@ def infer_resource(name: str, description: str = "") -> str | None:
         "user",
         "item",
         "invoice",
+        "category",
+        "restaurant",
+        "menu",
     ):
         if token in combined:
             return token
@@ -114,6 +118,8 @@ def bind_arguments(intent: dict[str, Any], tool: dict[str, Any]) -> dict[str, An
     for prop in properties:
         key = str(prop)
         lowered = key.lower().replace("-", "_")
+        if lowered in IGNORED_PARAMS or PARAM_ALIASES.get(lowered, lowered) in IGNORED_PARAMS:
+            continue
         alias = PARAM_ALIASES.get(lowered, lowered)
         if key in params:
             bound[key] = params[key]
@@ -126,6 +132,14 @@ def bind_arguments(intent: dict[str, Any], tool: dict[str, Any]) -> dict[str, An
     return bound
 
 
+def _required_fields(tool: dict[str, Any]) -> list[str]:
+    schema = tool.get("inputSchema") or tool.get("input_schema") or {}
+    if not isinstance(schema, dict):
+        return []
+    required = schema.get("required") or []
+    return [str(item) for item in required] if isinstance(required, list) else []
+
+
 def tool_satisfies(intent: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]:
     capability = capability_from_tool(tool)
     operation = str(intent.get("operation") or "").upper()
@@ -135,8 +149,10 @@ def tool_satisfies(intent: dict[str, Any], tool: dict[str, Any]) -> dict[str, An
     tool_resource = _singular(str(capability.get("resource") or ""))
     properties = schema_property_names(tool)
     if intent_resource and tool_resource and intent_resource != tool_resource:
-        if "resource" not in properties:
-            return {"ok": False, "reason": "resource_mismatch", "tool": tool.get("name")}
+        aliases = {"menu": "item", "menuitem": "item", "menu_item": "item"}
+        if aliases.get(intent_resource, intent_resource) != aliases.get(tool_resource, tool_resource):
+            if "resource" not in properties:
+                return {"ok": False, "reason": "resource_mismatch", "tool": tool.get("name")}
     features = {str(item).lower() for item in (intent.get("query_features") or [])}
     if "aggregation" in features and not capability["constraints"]["aggregation"]:
         return {"ok": False, "reason": "aggregation_unsupported", "tool": tool.get("name")}
@@ -148,25 +164,32 @@ def tool_satisfies(intent: dict[str, Any], tool: dict[str, Any]) -> dict[str, An
         properties & {"filter", "query", "q", "search", "where"}
     ):
         return {"ok": False, "reason": "filter_unsupported", "tool": tool.get("name")}
-    for key in intent.get("parameters") or {}:
-        alias = PARAM_ALIASES.get(str(key).lower(), str(key).lower())
-        if alias not in properties and str(key).lower() not in properties:
-            return {"ok": False, "reason": f"parameter_unsupported:{key}", "tool": tool.get("name")}
-    return {
-        "ok": True,
+    bound = bind_arguments(intent, tool)
+    missing = [
+        field
+        for field in _required_fields(tool)
+        if bound.get(field) in (None, "")
+    ]
+    result = {
         "tool": tool.get("name"),
-        "arguments": bind_arguments(intent, tool),
+        "arguments": bound,
         "capability": redact(capability),
-        "reason": "schema_match",
+        "missing": missing,
     }
+    if missing:
+        return {**result, "ok": False, "reason": "missing_parameters"}
+    return {**result, "ok": True, "reason": "schema_match"}
 
 
 def first_matching_tool(
     intent: dict[str, Any],
     tools: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
+    missing_match = None
     for tool in tools or []:
         result = tool_satisfies(intent, tool)
         if result.get("ok"):
             return result
-    return None
+        if result.get("reason") == "missing_parameters" and missing_match is None:
+            missing_match = result
+    return missing_match

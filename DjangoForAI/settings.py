@@ -9,6 +9,7 @@ import sys
 from django.core.exceptions import ImproperlyConfigured
 
 from DjangoForAI.app_mode import api_enabled, chat_enabled, parse_app_mode
+from DjangoForAI.runtime_env import resolve_secret_and_debug
 
 try:
     from dotenv import load_dotenv
@@ -19,13 +20,7 @@ except ImportError:
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY") or os.getenv("SECRET_KEY") or (
-    "django-insecure-+-_nf=u6gu6%$hqqw@!s9olj^fiody=f(tr6t7*95z3v3&t0(_"
-)
-
-debug_default = "true" if SECRET_KEY.startswith("django-insecure-") else "false"
-debug_raw = os.getenv("DJANGO_DEBUG") or os.getenv("DEBUG") or debug_default
-DEBUG = str(debug_raw).lower() in {"1", "true", "yes"}
+SECRET_KEY, DEBUG = resolve_secret_and_debug()
 
 allowed_hosts_raw = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
 ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_raw.split(",") if host.strip()]
@@ -103,7 +98,6 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "chat.authentication.ApiKeyAuthentication",
         "rest_framework.authentication.SessionAuthentication",
-        "rest_framework.authentication.BasicAuthentication",
     ],
     "EXCEPTION_HANDLER": "chat.api.exception_handler.exception_handler",
 }
@@ -134,6 +128,7 @@ AUTH_PASSWORD_VALIDATORS = [
     },
     # {
     #     "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+    #     "OPTIONS": {"min_length": 8},
     # },
     # {
     #     "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",

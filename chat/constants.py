@@ -1,10 +1,13 @@
 """Constants and configuration for the chat application"""
 
+import os
+
 # Ollama API Configuration
-OLLAMA_BASE_URL = "http://localhost:11434"
+# Docker/EC2 localhost is the host machine, not a compose service.
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_CHAT_ENDPOINT = f"{OLLAMA_BASE_URL}/api/chat"
-OLLAMA_MODEL = "qwen2.5:3b"
-OLLAMA_TIMEOUT = 100.0  # seconds
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
+OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "100"))
 OLLAMA_STREAM_TIMEOUT = 60.0
 
 

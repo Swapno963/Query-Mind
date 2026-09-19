@@ -74,8 +74,7 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
 
-          source: "docker-compose.deployment.yml"
-
+          source: "docker-compose.deployment.yml,nginx.conf"
           target: /opt/app
 
 
@@ -91,6 +90,7 @@ jobs:
           BACKEND_IMAGE_TAG: ${{ inputs.backend_image_tag }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY}}
           APP_MODE: ${{ secrets.APP_MODE }}
+          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
 
 
 
@@ -106,6 +106,7 @@ jobs:
             BACKEND_IMAGE_TAG,
             GEMINI_API_KEY,
             APP_MODE,
+            DJANGO_SECRET_KEY,
 
            
 
@@ -132,7 +133,7 @@ jobs:
               ECR_REGISTRY
               BACKEND_IMAGE_TAG
               GEMINI_API_KEY
-              
+              DJANGO_SECRET_KEY
             )
 
             missing_variables=()
@@ -165,8 +166,10 @@ jobs:
             BACKEND_IMAGE_TAG=${BACKEND_IMAGE_TAG}
             GEMINI_API_KEY=${GEMINI_API_KEY}
             APP_MODE=${APP_MODE:-both}
-            DJANGO_ALLOWED_HOSTS=chatapp.clustorflow.com,localhost,127.0.0.1
-            DJANGO_CSRF_TRUSTED_ORIGINS=https://chatapp.clustorflow.com
+            DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
+            DJANGO_DEBUG=false
+            DJANGO_ALLOWED_HOSTS=chatapp.clustorflow.com,localhost,127.0.0.1,chat-llm,querymind-nginx
+            DJANGO_CSRF_TRUSTED_ORIGINS=http://chatapp.clustorflow.com,https://chatapp.clustorflow.com
           
             EOF
             
@@ -210,10 +213,10 @@ jobs:
             echo "======================================="
 
             ####################################################
-            # Shared edge network (edge-nginx + ServeEasy)
+            # This box is Query Mind only. Stop leftover shared-EC2 routers.
             ####################################################
-            docker network inspect public_web >/dev/null 2>&1 || docker network create public_web
-            docker rm -f nginx 2>/dev/null || true
+            docker rm -f nginx edge-nginx 2>/dev/null || true
+
             docker compose \
               --env-file .env \
               -f docker-compose.deployment.yml \
@@ -290,6 +293,28 @@ jobs:
                 echo "API did not become healthy within ${timeout_seconds}s."
                 docker inspect --format='{{json .State.Health}}' chat-llm || true
                 docker compose --env-file .env -f docker-compose.deployment.yml logs --tail=150 api || true
+                exit 1
+              fi
+
+              sleep 5
+              elapsed=$((elapsed + 5))
+            done
+
+            echo "Waiting for nginx to become healthy..."
+
+            elapsed=0
+            while true; do
+              nginx_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' querymind-nginx)"
+              echo "querymind-nginx health: ${nginx_health} (${elapsed}s)"
+
+              if [ "$nginx_health" = "healthy" ]; then
+                break
+              fi
+
+              if [ "$elapsed" -ge "$timeout_seconds" ]; then
+                echo "nginx did not become healthy within ${timeout_seconds}s."
+                docker inspect --format='{{json .State.Health}}' querymind-nginx || true
+                docker compose --env-file .env -f docker-compose.deployment.yml logs --tail=150 nginx || true
                 exit 1
               fi
 

@@ -1,5 +1,6 @@
 from typing import Any
 
+from agent.operation import requested_result_limit_for_state
 from connections.models import WorkspaceConnection
 from connections.services.sql_validation import executor_for_workspace
 from connections.services.fewshot import record_success
@@ -11,6 +12,7 @@ def sql_executor(state: QueryMindState) -> dict[str, Any]:
     sql = (state.sql or "").strip()
     allowed = list(state.allowed_tables or [])
     allowed_columns = dict(state.allowed_columns or {})
+    requested_limit = requested_result_limit_for_state(state)
 
     if not allowed or not allowed_columns:
         return {
@@ -66,9 +68,9 @@ def sql_executor(state: QueryMindState) -> dict[str, Any]:
     )
 
     try:
-        executor.validate(sql)
+        sql = executor.normalized_sql(sql, requested_limit=requested_limit)
         rows: list[dict[str, Any]] = []
-        for row in executor.stream(sql):
+        for row in executor.stream(sql, requested_limit=requested_limit):
             rows.append(row)
         columns = list(rows[0].keys()) if rows else []
         linked = list((state.intent or {}).get("tables") or state.allowed_tables or [])
@@ -82,6 +84,7 @@ def sql_executor(state: QueryMindState) -> dict[str, Any]:
         except Exception:
             pass
         return {
+            "sql": sql,
             "execution_result": {
                 "success": True,
                 "rows": rows,

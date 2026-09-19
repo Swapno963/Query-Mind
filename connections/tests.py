@@ -1,4 +1,5 @@
 from django.test import SimpleTestCase
+from unittest.mock import patch
 
 from agent.graph import (
     route_after_capability,
@@ -60,20 +61,102 @@ class AllowListValidationTests(SimpleTestCase):
         with self.assertRaises(PermissionError):
             executor.validate("SELECT email FROM orders")
 
-    def test_rejects_select_star(self):
+    def test_expands_select_star_to_allowed_columns(self):
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders"},
+            allowed_columns={"orders": ["id", "total_amount", "payment_status"]},
+        )
+        sql = executor.normalized_sql("SELECT * FROM orders")
+        self.assertNotIn("*", sql)
+        self.assertIn("id", sql.lower())
+        self.assertIn("total_amount", sql.lower())
+        self.assertIn("payment_status", sql.lower())
+        self.assertRegex(sql.lower(), r"\blimit\s+100\b")
+
+    def test_expands_select_star_when_only_some_columns_are_allowed(self):
         executor = ReadOnlySQLExecutor(
             allowed_tables={"orders"},
             allowed_columns={"orders": ["id"]},
         )
+        sql = executor.normalized_sql("SELECT * FROM orders")
+        self.assertEqual(sql, "SELECT id FROM orders LIMIT 100")
+
+    def test_expands_qualified_star(self):
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders"},
+            allowed_columns={"orders": ["id", "total_amount"]},
+        )
+        sql = executor.normalized_sql("SELECT o.* FROM orders o")
+        self.assertNotIn("*", sql)
+        self.assertIn("o.id", sql.lower())
+        self.assertIn("o.total_amount", sql.lower())
+        self.assertRegex(sql.lower(), r"\blimit\s+100\b")
+
+    def test_rejects_star_when_starred_table_has_no_allowed_columns(self):
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders", "customers"},
+            allowed_columns={"orders": ["id"], "customers": []},
+        )
         with self.assertRaises(PermissionError):
-            executor.validate("SELECT * FROM orders")
+            executor.validate(
+                "SELECT * FROM orders o JOIN customers c ON c.id = o.customer_id"
+            )
 
     def test_allows_count_star(self):
         executor = ReadOnlySQLExecutor(
             allowed_tables={"orders"},
             allowed_columns={"orders": ["id"]},
         )
-        self.assertIsNotNone(executor.validate("SELECT COUNT(*) AS n FROM orders"))
+        sql = executor.normalized_sql("SELECT COUNT(*) AS n FROM orders")
+        self.assertIn("COUNT(*)", sql.upper().replace(" ", ""))
+        self.assertNotRegex(sql.lower(), r"\blimit\b")
+
+    def test_caps_sql_limit_at_100(self):
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders"},
+            allowed_columns={"orders": ["id"]},
+        )
+        sql = executor.normalized_sql("SELECT id FROM orders LIMIT 500")
+        self.assertRegex(sql.lower(), r"\blimit\s+100\b")
+
+    def test_keeps_sql_limit_below_100(self):
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders"},
+            allowed_columns={"orders": ["id"]},
+        )
+        sql = executor.normalized_sql("SELECT id FROM orders LIMIT 20")
+        self.assertRegex(sql.lower(), r"\blimit\s+20\b")
+
+    def test_uses_requested_limit_and_caps_at_100(self):
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders"},
+            allowed_columns={"orders": ["id"]},
+        )
+        sql = executor.normalized_sql(
+            "SELECT * FROM orders", requested_limit=20
+        )
+        self.assertEqual(sql, "SELECT id FROM orders LIMIT 20")
+        sql = executor.normalized_sql(
+            "SELECT * FROM orders", requested_limit=1000
+        )
+        self.assertEqual(sql, "SELECT id FROM orders LIMIT 100")
+
+    def test_expands_join_star_per_table(self):
+        executor = ReadOnlySQLExecutor(
+            allowed_tables={"orders", "customers"},
+            allowed_columns={
+                "orders": ["id", "customer_id"],
+                "customers": ["id", "email"],
+            },
+        )
+        sql = executor.normalized_sql(
+            "SELECT * FROM orders o JOIN customers c ON c.id = o.customer_id"
+        )
+        lower = sql.lower()
+        self.assertNotIn("*", sql)
+        self.assertIn("o.id", lower)
+        self.assertIn("c.email", lower)
+        self.assertRegex(lower, r"\blimit\s+100\b")
 
     def test_rejects_non_select(self):
         executor = ReadOnlySQLExecutor(
@@ -96,6 +179,42 @@ class AllowListValidationTests(SimpleTestCase):
             with self.subTest(sql=sql):
                 with self.assertRaises(ValueError):
                     executor.validate(sql)
+
+
+class SqlRewriteNodeTests(SimpleTestCase):
+    def test_sql_validator_rewrites_star_and_adds_limit(self):
+        from agent.nodes.sql_validator import sql_validator
+
+        state = QueryMindState(
+            question="Show me orders",
+            conversation_id=1,
+            message_id=1,
+            connection_id=1,
+            sql="SELECT * FROM orders",
+            allowed_tables=["orders"],
+            allowed_columns={"orders": ["id", "total_amount"]},
+        )
+        result = sql_validator(state)
+        self.assertTrue(result["is_valid"])
+        self.assertEqual(
+            result["sql"], "SELECT id, total_amount FROM orders LIMIT 100"
+        )
+
+    def test_sql_validator_uses_first_n_from_the_question(self):
+        from agent.nodes.sql_validator import sql_validator
+
+        state = QueryMindState(
+            question="Show the first 12 orders",
+            conversation_id=1,
+            message_id=1,
+            connection_id=1,
+            sql="SELECT * FROM orders",
+            allowed_tables=["orders"],
+            allowed_columns={"orders": ["id"]},
+        )
+        result = sql_validator(state)
+        self.assertTrue(result["is_valid"])
+        self.assertEqual(result["sql"], "SELECT id FROM orders LIMIT 12")
 
 
 class SchemaFilterTests(SimpleTestCase):
@@ -281,6 +400,70 @@ class GraphFailClosedTests(SimpleTestCase):
     def test_error_analysis_can_repair(self):
         state = self._state(error_analysis={"action": "repair"}, retry_count=0)
         self.assertEqual(route_after_on_premise_error_analysis(state), "repair")
+
+    def test_error_analysis_stops_after_retry_budget(self):
+        state = self._state(
+            error_analysis={"action": "schema"},
+            retry_count=3,
+            sql_attempts=3,
+        )
+        self.assertEqual(route_after_on_premise_error_analysis(state), "end")
+
+    def test_schema_refresh_is_not_repeated(self):
+        from agent.nodes.error_analyzer import error_analyzer
+
+        first = error_analyzer(
+            self._state(database_error='column "foo" does not exist')
+        )
+        self.assertEqual(first["error_analysis"]["action"], "schema")
+        self.assertEqual(first["retry_count"], 1)
+        second = error_analyzer(
+            self._state(
+                database_error='column "foo" does not exist',
+                error_analysis=first["error_analysis"],
+                retry_count=first["retry_count"],
+                sql_attempts=1,
+            )
+        )
+        self.assertEqual(second["error_analysis"]["action"], "repair")
+        self.assertEqual(
+            route_after_on_premise_error_analysis(
+                self._state(
+                    error_analysis=second["error_analysis"],
+                    retry_count=second["retry_count"],
+                    sql_attempts=1,
+                )
+            ),
+            "repair",
+        )
+
+
+class ResultFormatterTests(SimpleTestCase):
+    def test_show_all_orders_does_not_call_llm(self):
+        from agent.nodes.result_formatter import result_formatter
+
+        state = QueryMindState(
+            question="show all orders",
+            conversation_id=1,
+            message_id=1,
+            connection_id=1,
+            intent={
+                "valid": True,
+                "output": "row_list",
+                "tables": ["orders"],
+                "entity": "orders",
+            },
+            execution_result={
+                "success": True,
+                "kind": "success",
+                "rows": [{"id": 1, "status": "paid"}, {"id": 2, "status": "pending"}],
+            },
+        )
+        with patch("agent.nodes.result_formatter.ask_state") as ask:
+            result = result_formatter(state)
+        ask.assert_not_called()
+        self.assertIn("2 matching rows", result["final_answer"])
+        self.assertEqual(result["status"], "completed")
 
 
 class ConnectionErrorCopyTests(SimpleTestCase):
@@ -476,11 +659,66 @@ class ExecutionPolicyTests(SimpleTestCase):
         self.assertTrue(decide("READ")["sql_allowed"])
         self.assertFalse(decide("UPDATE")["sql_allowed"])
         self.assertTrue(decide("UPDATE")["mcp_required"])
+        self.assertFalse(decide("UPDATE", product_surface="chat")["mcp_allowed"])
         self.assertEqual(resolve_mode(operation="READ", mcp_capable=True, mcp_available=True), "mcp")
         self.assertEqual(resolve_mode(operation="READ", mcp_capable=False, mcp_available=True), "sql")
         self.assertEqual(resolve_mode(operation="CREATE", mcp_capable=True, mcp_available=True), "mcp")
         self.assertEqual(resolve_mode(operation="CREATE", mcp_capable=False, mcp_available=True), "deny")
         self.assertEqual(resolve_mode(operation="DELETE", mcp_capable=False, mcp_available=False), "deny")
+        self.assertEqual(
+            resolve_mode(
+                operation="DELETE",
+                mcp_capable=True,
+                mcp_available=True,
+                product_surface="chat",
+            ),
+            "deny",
+        )
+
+    def test_greeting_is_conversation_not_sql(self):
+        from agent.graph import route_after_classify
+        from agent.nodes.classify import classify_operation
+        from agent.operation import classify_request_kind
+
+        self.assertEqual(classify_request_kind("hello", use_llm=False), "conversation")
+        self.assertEqual(classify_request_kind("Thanks!", use_llm=False), "conversation")
+        self.assertEqual(classify_request_kind("tell me a joke", use_llm=False), "conversation")
+        self.assertEqual(classify_request_kind("How many orders?", use_llm=False), "query")
+        result = classify_operation(self._state(question="Thanks!"))
+        self.assertEqual(result["execution_mode"], "converse")
+        self.assertEqual(route_after_classify(self._state(execution_mode="converse")), "converse")
+        self.assertEqual(route_after_classify(self._state(execution_mode="sql", status="running")), "policy")
+
+    def test_chat_refuses_writes_and_does_not_ask_for_cud(self):
+        from agent.nodes.classify import classify_operation
+        from agent.nodes.refuse import refuse_answer
+
+        result = classify_operation(
+            self._state(question="Delete inactive customers", product_surface="chat")
+        )
+        self.assertEqual(result["execution_mode"], "deny")
+        self.assertEqual(result["routing"]["reason"], "chat_read_only")
+        refused = refuse_answer(
+            self._state(
+                answer_kind="unsupported_operation",
+                product_surface="chat",
+                routing={"reason": "chat_read_only"},
+            )
+        )
+        self.assertNotIn("look up, create, update, or delete something", refused["final_answer"])
+        self.assertIn("only look up", refused["final_answer"].lower())
+        clarify = refuse_answer(self._state(answer_kind="needs_clarification"))
+        self.assertNotIn("create, update, or delete something", clarify["final_answer"])
+
+    def test_requested_result_limit_from_question_and_intent(self):
+        from agent.operation import requested_result_limit, requested_result_limit_for_state
+
+        self.assertEqual(requested_result_limit(question="Show the first 12 orders"), 12)
+        self.assertEqual(requested_result_limit({"parameters": {"limit": 20}}), 20)
+        self.assertEqual(requested_result_limit({"parameters": {"limit": 500}}), 500)
+        self.assertIsNone(requested_result_limit(question="Show me orders"))
+        state = self._state(question="top 8 products")
+        self.assertEqual(requested_result_limit_for_state(state), 8)
 
     def test_verb_override_delete_is_not_read(self):
         from agent.operation import extract_operation
@@ -604,3 +842,120 @@ class ExecutionPolicyTests(SimpleTestCase):
         hidden = redact({"token": "abc", "order_id": "123"})
         self.assertEqual(hidden["token"], "[redacted]")
         self.assertEqual(hidden["order_id"], "123")
+
+    def test_missing_required_params_clarify(self):
+        from agent.nodes.capability import capability_resolve
+
+        create_item = {
+            "name": "create_menu_item",
+            "description": "Create a menu item",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "price": {"type": "string"},
+                    "category_name": {"type": "string"},
+                },
+                "required": ["name", "price", "category_name"],
+            },
+        }
+        intent = {
+            "valid": True,
+            "operation": "CREATE",
+            "resource": "item",
+            "action": "create",
+            "parameters": {"name": "Chicken Biryani"},
+            "query_features": [],
+            "reason": "",
+        }
+        result = capability_resolve(self._state(operation_intent=intent), tools=[create_item])
+        self.assertEqual(result["execution_mode"], "clarify")
+        self.assertEqual(result["answer_kind"], "needs_parameters")
+        self.assertIn("price", result["routing"]["missing"])
+
+    def test_mcp_only_read_does_not_fallback_to_sql(self):
+        from agent.nodes.capability import capability_resolve
+        from agent.operation import extract_operation
+        from agent.policy import resolve_mode
+
+        self.assertEqual(
+            resolve_mode(
+                operation="READ",
+                mcp_capable=False,
+                mcp_available=True,
+                sql_available=False,
+            ),
+            "deny",
+        )
+        intent = extract_operation("Show me order 123", use_llm=False)
+        result = capability_resolve(
+            self._state(
+                operation_intent=intent,
+                question="Show me order 123",
+                mcp_server_url="https://example.com/mcp",
+            ),
+            tools=[],
+        )
+        self.assertEqual(result["execution_mode"], "deny")
+        self.assertFalse(result["routing"]["sql_fallback"])
+
+    def test_create_category_matches_menu_tool(self):
+        from agent.nodes.capability import capability_resolve
+        from agent.operation import extract_operation
+
+        create_category = {
+            "name": "create_menu_category",
+            "description": "Create a menu category",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        }
+        intent = extract_operation("Create a new category called Desserts", use_llm=False)
+        intent["parameters"] = {"name": "Desserts"}
+        result = capability_resolve(self._state(operation_intent=intent), tools=[create_category])
+        self.assertEqual(result["execution_mode"], "mcp")
+        self.assertEqual(result["routing"]["tool"], "create_menu_category")
+
+    def test_extract_operation_falls_back_when_llm_unavailable(self):
+        from unittest.mock import patch
+
+        from agent.operation import extract_operation
+        from chat.api.chat_service import LLMUnavailable
+
+        with patch("agent.operation.ask_llm", side_effect=LLMUnavailable("down")):
+            intent = extract_operation("Show today's orders", use_llm=True)
+        self.assertTrue(intent["valid"])
+        self.assertEqual(intent["operation"], "READ")
+
+    def test_list_tools_forwards_auth_headers(self):
+        from unittest.mock import patch
+
+        from agent.nodes.capability import capability_resolve
+        from agent.operation import extract_operation
+
+        intent = extract_operation("Show me order 123", use_llm=False)
+        state = self._state(
+            operation_intent=intent,
+            question="Show me order 123",
+            mcp_server_url="https://example.com/mcp",
+            mcp_headers={"Authorization": "Bearer secret"},
+        )
+        with patch("agent.nodes.capability.list_tools", return_value=[GET_ORDER]) as listed:
+            capability_resolve(state)
+            listed.assert_called_with(
+                "https://example.com/mcp",
+                {"Authorization": "Bearer secret"},
+            )
+
+
+class JsonSafeValueTests(SimpleTestCase):
+    def test_decimal_becomes_string(self):
+        from decimal import Decimal
+
+        from connections.services.jsonutil import json_safe_row
+
+        row = json_safe_row({"average_price": Decimal("19.9900")})
+        self.assertEqual(row["average_price"], "19.9900")
+        self.assertIsInstance(row["average_price"], str)

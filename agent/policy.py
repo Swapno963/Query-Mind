@@ -5,7 +5,7 @@ from typing import Any
 from agent.operation import READ, WRITE_OPERATIONS, OPERATIONS
 
 
-def decide(operation: str | None) -> dict[str, Any]:
+def decide(operation: str | None, *, product_surface: str = "") -> dict[str, Any]:
     op = str(operation or "").upper()
     if op == READ:
         return {
@@ -15,6 +15,13 @@ def decide(operation: str | None) -> dict[str, Any]:
             "mcp_required": False,
         }
     if op in WRITE_OPERATIONS:
+        if product_surface == "chat":
+            return {
+                "operation": op,
+                "sql_allowed": False,
+                "mcp_allowed": False,
+                "mcp_required": False,
+            }
         return {
             "operation": op,
             "sql_allowed": False,
@@ -34,18 +41,20 @@ def resolve_mode(
     operation: str | None,
     mcp_capable: bool,
     mcp_available: bool,
+    sql_available: bool = True,
+    product_surface: str = "",
 ) -> str:
-    """Return mcp, sql, or deny. Never sql for writes."""
-    policy = decide(operation)
+    """Return mcp, sql, or deny. Never sql for writes. Chat never writes."""
+    policy = decide(operation, product_surface=product_surface)
     op = policy["operation"]
     if op not in OPERATIONS:
         return "deny"
     if policy["mcp_required"]:
-        if mcp_available and mcp_capable:
+        if mcp_available and mcp_capable and policy["mcp_allowed"]:
             return "mcp"
         return "deny"
-    if mcp_available and mcp_capable:
+    if policy["mcp_allowed"] and mcp_available and mcp_capable:
         return "mcp"
-    if policy["sql_allowed"]:
+    if policy["sql_allowed"] and sql_available:
         return "sql"
     return "deny"

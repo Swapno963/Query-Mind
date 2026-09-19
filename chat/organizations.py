@@ -63,6 +63,15 @@ def mcp_server_url_for(user) -> str:
     return (getattr(org, "mcp_server_url", None) or "").strip() if org else ""
 
 
+def is_platform_admin(user) -> bool:
+    return bool(
+        user
+        and getattr(user, "is_authenticated", False)
+        and getattr(user, "is_superuser", False)
+        and user.is_active
+    )
+
+
 def is_org_admin(user) -> bool:
     membership = active_membership(user)
     return bool(
@@ -70,9 +79,15 @@ def is_org_admin(user) -> bool:
     )
 
 
+def is_staff_admin(user) -> bool:
+    return is_platform_admin(user) or is_org_admin(user)
+
+
 def is_org_member_active(user) -> bool:
     if not user or not user.is_active:
         return False
+    if is_platform_admin(user):
+        return True
     membership = active_membership(user)
     return bool(membership)
 

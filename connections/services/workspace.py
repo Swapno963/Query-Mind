@@ -270,6 +270,50 @@ def discover_live_schema(
         conn.close()
 
 
+def apply_workspace_allow_list(workspace, *, requested_tables, requested_columns):
+    """Update allow-lists from Your data without re-running the setup wizard."""
+    import re
+
+    discovered_tables = list(workspace.discovered_tables or [])
+    discovered_columns = dict(workspace.discovered_columns or {})
+    if not discovered_tables:
+        discovered_tables = list(workspace.allowed_tables or [])
+    if not discovered_columns:
+        discovered_columns = dict(workspace.allowed_columns or {})
+    allowed, allowed_columns = intersect_allow_lists(
+        requested_tables=list(requested_tables or []),
+        requested_columns=dict(requested_columns or {}),
+        discovered_tables=discovered_tables,
+        discovered_columns=discovered_columns,
+    )
+    if not allowed:
+        raise WorkspaceConnectionError(
+            "Choose at least one table and column QueryMind may use. This is a security boundary."
+        )
+    from connections.services.catalog import schema_text_from_catalog
+
+    original = workspace.schema_text or ""
+    has_all = all(
+        re.search(rf"TABLE:\s+{re.escape(name)}\b", original, re.I) for name in allowed
+    )
+    source = (
+        original
+        if has_all
+        else schema_text_from_catalog(
+            discovered_tables,
+            discovered_columns,
+            getattr(workspace, "engine", ENGINE_POSTGRES),
+        )
+    )
+    workspace.allowed_tables = allowed
+    workspace.allowed_columns = allowed_columns
+    workspace.schema_text = filter_schema_to_tables(source, allowed, allowed_columns)
+    workspace.save(
+        update_fields=["allowed_tables", "allowed_columns", "schema_text", "updated_at"]
+    )
+    return workspace
+
+
 def refresh_workspace_schema(workspace):
     """Re-read live tables using stored credentials after process restart."""
     password = workspace.get_password() if workspace else ""

@@ -1,81 +1,56 @@
-# Django AI Chat with Ollama and HTMX
+# QueryMind
 
-A real-time streaming chat application built with Django, HTMX, and Server-Sent Events (SSE) to mimic popular LLMs like ChatGPT, Claude, etc. It integrates with local LLMs via Ollama.
+QueryMind is the **MCP client** and SQL chat product. ServeEasy is a separate restaurant SaaS and MCP **server**. Do not put restaurant JWTs in QueryMind settings — only the MCP server URL.
 
-## Features
-
-- 🚀 Real-time streaming responses using Server-Sent Events (SSE)
-- 🤖 Local LLM integration via Ollama (Gemma 3:4B)
-- 📝 Markdown support with syntax highlighting
-- 💬 Conversation history and context management
-- 🎨 Clean, responsive UI with HTMX
-
-## Installation
-
-### 1. Install and Configure Ollama
-
-Download and install the [Ollama desktop app](https://ollama.com/) for your platform.
-
-Once installed, pull the Gemma 3:4B model (3.3GB):
-
-```bash
-ollama pull gemma3:4b
-```
-
-Ensure Ollama is running in the background (it runs on `http://localhost:11434` by default).
-
-### 2. Set Up with uv
-
-[uv](https://docs.astral.sh/uv/) is a fast Python package manager. Install it if you haven't already:
+## Run locally
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Then run the project:
-
-```bash
-# Install dependencies and run migrations
 uv run python manage.py migrate
-
-# Create a superuser to access the admin panel
 uv run python manage.py createsuperuser
-
-# Start the development server
+uv run python manage.py seed_example_data
 uv run python manage.py runserver
 ```
 
-## Usage
+Optional local LLM: Ollama on the **host** (`http://localhost:11434`). Docker/EC2 `localhost` is that host, not a compose service. Set `OLLAMA_BASE_URL` if Ollama is elsewhere. Org backend `local` does **not** fall back to Gemini.
 
-1. Open your browser and navigate to `http://127.0.0.1:8000/`
-2. Type a message in the input field
-3. Watch as the AI response streams in real-time
-4. Previous conversations are saved and accessible from the homepage and the admin at `http://127.0.0.1:8000/admin/`
-
-## Project Structure
-
+```bash
+ollama pull qwen2.5:3b
 ```
-DjangoForAI/
-├── chat/
-│   ├── models.py          # Conversation and Message models
-│   ├── views.py           # Main view logic using Django CBVs
-│   ├── views_stream.py    # SSE streaming implementation
-│   ├── services.py        # Business logic for Ollama API and conversations
-│   ├── forms.py           # Django forms for message validation
-│   ├── constants.py       # Configuration constants and settings
-│   ├── exceptions.py      # Custom exception classes
-│   ├── urls.py            # URL routing
-│   ├── admin.py           # Django admin configuration
-│   └── migrations/        # Database migrations
-├── templates/
-│   ├── homepage.html      # Landing page with recent chats
-│   └── chat.html          # Chat interface
-├── static/
-│   └── css/
-│       └── chat.css       # Styling for chat interface
-├── DjangoForAI/
-│   ├── settings.py        # Django settings
-│   └── urls.py            # Root URL configuration
-├── manage.py              # Django management script
-└── pyproject.toml         # Python project dependencies for uv
+
+## Tests
+
+```bash
+uv run python manage.py test chat.tests connections.tests
 ```
+
+## Environment
+
+| Variable | Purpose |
+|---|---|
+| `DJANGO_SECRET_KEY` | Required in production (`APP_ENV=production`) and whenever `DEBUG` is false |
+| `DJANGO_DEBUG` / `DEBUG` | Production deploy writes `false`. Never inferred from an insecure key in production |
+| `APP_ENV` | `production` fail-closes missing/insecure secrets |
+| `APP_MODE` | `chat`, `api`, or `both` |
+| `DJANGO_ALLOWED_HOSTS` | Explicit hosts when DEBUG is false |
+| `GEMINI_API_KEY` | Online LLM |
+| `OLLAMA_BASE_URL` | Default `http://localhost:11434` |
+| `SQLITE_PATH` | Production compose uses `/app/data/db.sqlite3` (SQLite volume, not the local Postgres vars) |
+
+GitHub deploy secret **`DJANGO_SECRET_KEY`** is required. See [docs/ec2-deploy.md](docs/ec2-deploy.md).
+
+## Docs (sign in, API-enabled org)
+
+- API keys: http://127.0.0.1:8000/developers/
+- MCP client: http://127.0.0.1:8000/developers/mcp/
+
+## Architecture notes
+
+- ServeEasy staff chat calls QueryMind `POST /api/v1/messages/` with `x-api-key` and `X-MCP-Authorization` (restaurant JWT).
+- QueryMind lists/calls tools on ServeEasy `/mcp`. Restaurant RBAC is the JWT on ServeEasy, not a QueryMind allowlist. ServeEasy production must be **ASGI** (Gunicorn + UvicornWorker); `runserver` is WSGI JSON-RPC only.
+- Django `/admin/` is QueryMind-branded **staff admin** for superusers (orgs, memberships, MCP URLs, API keys). Organization admins use Dashboard and Team in the product.
+- Writes never go through SQL against the restaurant database.
+- There are **no** Celery/Redis workers. Production nginx is HTTP `:80` until TLS is terminated in front — go-live gate, not done in this repo.
+- `vercel.json` is not a QueryMind deploy path.
+
+Production URL: `http://chatapp.clustorflow.com`. ServeEasy is a different EC2.

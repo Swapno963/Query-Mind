@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+import json
 
 from django.contrib.auth.models import User
 from django.test import Client, TestCase, override_settings
@@ -64,6 +65,50 @@ class AuthIsolationTests(TestCase):
             {"email": "alice@example.com", "password": "wrong-password"},
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_createsuperuser_can_login_with_email(self):
+        User.objects.create_superuser(
+            username="xyz",
+            email="a@b.com",
+            password=self.password,
+        )
+        response = self.client.post(
+            reverse("login"),
+            {"email": "a@b.com", "password": self.password},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("dashboard"))
+        from chat.models import OrganizationMembership
+
+        self.assertFalse(
+            OrganizationMembership.objects.filter(user__email="a@b.com").exists()
+        )
+
+    def test_platform_admin_cannot_mint_org_api_key(self):
+        admin = User.objects.create_superuser(
+            username="xyz",
+            email="a@b.com",
+            password=self.password,
+        )
+        self.client.force_login(admin)
+        before = ApiKey.objects.count()
+        response = self.client.post(reverse("developers"), {"action": "create_key"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(ApiKey.objects.count(), before)
+
+    def test_platform_admin_cannot_save_mcp_url_without_org(self):
+        admin = User.objects.create_superuser(
+            username="boss",
+            email="boss@example.com",
+            password=self.password,
+        )
+        self.client.force_login(admin)
+        response = self.client.post(
+            reverse("team"),
+            {"action": "save_mcp", "mcp_server_url": "http://127.0.0.1:8001/mcp"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("dashboard"))
 
     def test_ask_requires_login(self):
         response = self.client.get(reverse("ask"))
@@ -305,6 +350,109 @@ class QueryMindAPITests(TestCase):
             ).get_password()
         )
 
+    def test_messages_use_org_local_and_online_llm(self):
+        self._ready_workspace()
+        raw = self._approve_and_mint()
+        self._auth(raw)
+        org = organization_for(self.user)
+        fake_graph = MagicMock()
+        fake_graph.invoke.return_value = {
+            "sql": "SELECT 1",
+            "validation_result": {"valid": True, "kind": "ok"},
+        }
+        for backend in ("local", "online"):
+            org.llm_backend = backend
+            org.save(update_fields=["llm_backend"])
+            fake_graph.reset_mock()
+            with patch("chat.api.views.build_api_query_graph", return_value=fake_graph):
+                asked = self.api.post(
+                    "/api/v1/messages/",
+                    {"content": "How many unpaid orders?"},
+                    format="json",
+                )
+            self.assertEqual(asked.status_code, 200)
+            state = fake_graph.invoke.call_args[0][0]
+            self.assertEqual(state.llm_backend, backend)
+
+    def test_chat_endpoint_forwards_mcp_authorization(self):
+        self._ready_workspace()
+        raw = self._approve_and_mint()
+        self._auth(raw)
+        fake_graph = MagicMock()
+        fake_graph.invoke.return_value = {
+            "sql": "SELECT 1",
+            "validation_result": {"valid": True, "kind": "ok"},
+        }
+        with patch("chat.api.views.build_api_query_graph", return_value=fake_graph):
+            asked = self.api.post(
+                "/api/v1/chat/",
+                {"message": "How many unpaid orders?"},
+                format="json",
+                HTTP_X_MCP_AUTHORIZATION="Bearer restaurant-jwt",
+            )
+        self.assertEqual(asked.status_code, 200)
+        state = fake_graph.invoke.call_args[0][0]
+        self.assertEqual(
+            state.mcp_headers.get("Authorization"),
+            "Bearer restaurant-jwt",
+        )
+
+
+class RuntimeEnvTests(TestCase):
+    def test_production_refuses_insecure_secret(self):
+        from django.core.exceptions import ImproperlyConfigured
+
+        from DjangoForAI.runtime_env import resolve_secret_and_debug
+
+        with self.assertRaises(ImproperlyConfigured):
+            resolve_secret_and_debug({"APP_ENV": "production"})
+        with self.assertRaises(ImproperlyConfigured):
+            resolve_secret_and_debug(
+                {
+                    "APP_ENV": "production",
+                    "DJANGO_SECRET_KEY": "django-insecure-x",
+                    "DJANGO_DEBUG": "true",
+                }
+            )
+
+    def test_dev_allows_insecure_default(self):
+        from DjangoForAI.runtime_env import resolve_secret_and_debug
+
+        secret, debug = resolve_secret_and_debug({})
+        self.assertTrue(debug)
+        self.assertTrue(secret.startswith("django-insecure-"))
+
+    def test_explicit_debug_false_requires_real_secret(self):
+        from django.core.exceptions import ImproperlyConfigured
+
+        from DjangoForAI.runtime_env import resolve_secret_and_debug
+
+        with self.assertRaises(ImproperlyConfigured):
+            resolve_secret_and_debug({"DEBUG": "false"})
+        secret, debug = resolve_secret_and_debug(
+            {"DJANGO_SECRET_KEY": "production-secret-key-value", "DEBUG": "false"}
+        )
+        self.assertFalse(debug)
+        self.assertEqual(secret, "production-secret-key-value")
+
+
+class LocalLlmFallbackTests(TestCase):
+    def test_local_backend_does_not_fall_back_to_gemini(self):
+        import os
+
+        from chat.api.chat_service import ChatService, LLMUnavailable
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"}):
+            with patch.object(
+                ChatService,
+                "ask_on_premise_ai",
+                side_effect=LLMUnavailable("down"),
+            ):
+                with patch.object(ChatService, "ask_ai") as ask_ai:
+                    with self.assertRaises(LLMUnavailable):
+                        ChatService.ask_for_backend("hello", backend="local")
+                    ask_ai.assert_not_called()
+
 
 class WorkspaceProductTests(TestCase):
     def setUp(self):
@@ -401,6 +549,20 @@ class WorkspaceProductTests(TestCase):
         self.assertIn('href="#create-key"', html)
         self.assertIn("On this page", html)
         self.assertIn("Example response", html)
+        self.assertContains(page, reverse("mcp_docs"))
+
+    def test_mcp_docs_page_has_in_page_toc(self):
+        page = self.client.get(reverse("mcp_docs"))
+        self.assertEqual(page.status_code, 200)
+        html = page.content.decode()
+        self.assertIn("On this page", html)
+        self.assertIn('href="#overview"', html)
+        self.assertIn('href="#auth"', html)
+        self.assertIn('href="#list"', html)
+        self.assertIn("X-MCP-Authorization", html)
+        self.assertIn("permission_denied", html)
+        self.assertContains(page, reverse("developers"))
+        self.assertContains(page, "list_orders")
 
     def test_api_messages_are_not_shown_in_chat_history(self):
         api_workspace = WorkspaceConnection.objects.create(
@@ -509,6 +671,7 @@ class AppModeRoutingTests(TestCase):
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["mode"], "api")
         self.assertEqual(self.client.get("/developers/").status_code, 302)
+        self.assertEqual(self.client.get("/developers/mcp/").status_code, 302)
 
     @override_settings(
         APP_MODE="chat",
@@ -522,6 +685,7 @@ class AppModeRoutingTests(TestCase):
         self.assertEqual(self.client.get("/api/v1/health").status_code, 200)
         self.assertEqual(self.client.get("/api/v1/chat/").status_code, 404)
         self.assertEqual(self.client.get("/developers/").status_code, 404)
+        self.assertEqual(self.client.get("/developers/mcp/").status_code, 404)
 
     @override_settings(
         APP_MODE="api",
@@ -638,6 +802,28 @@ class OrganizationAccessTests(TestCase):
         self.assertEqual(denied.status_code, 302)
         other_request.refresh_from_db()
         self.assertEqual(other_request.status, ApiAccessRequest.STATUS_PENDING)
+
+    def test_platform_admin_approves_any_org_api_request(self):
+        staff = User.objects.create_superuser(
+            username="staff",
+            email="staff@querymind.test",
+            password=self.password,
+        )
+        other_request = ApiAccessRequest.objects.create(
+            user=self.other,
+            status=ApiAccessRequest.STATUS_PENDING,
+        )
+        self.client.force_login(staff)
+        page = self.client.get(reverse("dashboard"))
+        self.assertContains(page, "Staff dashboard")
+        self.assertContains(page, "other@example.com")
+        approve = self.client.post(
+            reverse("dashboard"),
+            {"action": "approve_api", "request_id": other_request.id},
+        )
+        self.assertEqual(approve.status_code, 302)
+        other_request.refresh_from_db()
+        self.assertEqual(other_request.status, ApiAccessRequest.STATUS_APPROVED)
 
     def test_admin_dashboard_lists_member_question_titles(self):
         Conversation.objects.create(user=self.member, title="Weekly stock check")
@@ -761,6 +947,11 @@ class OrgProductSetupTests(TestCase):
         self.assertEqual(page.status_code, 302)
         self.assertEqual(page.url, reverse("ask"))
 
+    def test_chat_only_org_cannot_open_mcp_docs(self):
+        page = self.client.get(reverse("mcp_docs"))
+        self.assertEqual(page.status_code, 302)
+        self.assertEqual(page.url, reverse("ask"))
+
     def test_api_only_org_cannot_open_ask(self):
         apply_product_mode(self.org, "api")
         page = self.client.get(reverse("ask"))
@@ -780,6 +971,39 @@ class OrgProductSetupTests(TestCase):
         chat.refresh_from_db()
         self.assertEqual(chat.db_name, "shop")
         self.assertEqual(chat.allowed_tables, ["orders"])
+
+    def test_admin_updates_column_access_from_data_page(self):
+        workspace = self._ready_chat()
+        workspace.discovered_tables = ["orders", "products"]
+        workspace.discovered_columns = {
+            "orders": ["id", "status", "total_amount"],
+            "products": ["id", "name"],
+        }
+        workspace.schema_text = (
+            "DATABASE: PostgreSQL\n\n"
+            "TABLE: orders\n- id TEXT\n- status TEXT\n- total_amount TEXT\n\n"
+            "TABLE: products\n- id TEXT\n- name TEXT\n"
+        )
+        workspace.save()
+        page = self.client.get(reverse("data_access"))
+        self.assertEqual(page.status_code, 200)
+        html = page.content.decode()
+        self.assertIn('name="allowed_columns"', html)
+        self.assertNotIn("Change access", html)
+        saved = self.client.post(
+            reverse("data_access"),
+            {
+                "action": "save_access",
+                "allowed_tables": ["orders"],
+                "allowed_columns": ["orders.id", "orders.status"],
+            },
+        )
+        self.assertEqual(saved.status_code, 302)
+        self.assertEqual(saved.url, reverse("data_access"))
+        workspace.refresh_from_db()
+        self.assertEqual(workspace.allowed_tables, ["orders"])
+        self.assertEqual(workspace.allowed_columns, {"orders": ["id", "status"]})
+        self.assertNotIn("total_amount", workspace.schema_text)
 
     def test_member_cannot_change_products(self):
         from chat.organizations import create_member
@@ -839,5 +1063,143 @@ class OrgProductSetupTests(TestCase):
         list(response.streaming_content)
         online_graph.assert_called_once()
         local_graph.assert_not_called()
+
+    def test_switching_to_api_keeps_llm_backend(self):
+        apply_product_mode(self.org, "api")
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.product_mode, "api")
+        self.assertEqual(self.org.llm_backend, "local")
+
+    def test_api_onboarding_offers_local_and_online_llm(self):
+        apply_product_mode(self.org, "api")
+        page = self.client.get(reverse("onboarding") + "?track=api")
+        self.assertEqual(page.status_code, 200)
+        html = page.content.decode()
+        self.assertIn('name="llm_backend"', html)
+        self.assertIn('value="local"', html)
+        self.assertIn('value="online"', html)
+
+    def test_admin_can_save_online_llm_for_api_only(self):
+        response = self.client.post(
+            reverse("dashboard"),
+            {"action": "save_product", "product": "api", "llm_backend": "online"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.product_mode, "api")
+        self.assertEqual(self.org.llm_backend, "online")
+
+
+class StaffAdminBrandingTests(TestCase):
+    def test_login_is_querymind_branded(self):
+        response = self.client.get("/admin/login/")
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        self.assertIn("QueryMind staff", html)
+        self.assertIn("Email or username", html)
+        self.assertNotIn("Django administration", html)
+
+    def test_index_shows_platform_copy_for_superuser(self):
+        User.objects.create_superuser(
+            "admin@querymind.local",
+            "admin@querymind.local",
+            "CorrectHorseBattery9",
+        )
+        self.client.login(
+            username="admin@querymind.local",
+            password="CorrectHorseBattery9",
+        )
+        response = self.client.get("/admin/")
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        self.assertIn("QueryMind staff", html)
+        self.assertIn("Do not mint a superuser API key", html)
+        self.assertIn("Organizations", html)
+
+    def test_api_keys_cannot_be_created_in_admin(self):
+        from django.contrib.admin.sites import site
+
+        from chat.models import ApiKey
+
+        request = MagicMock()
+        request.user.is_superuser = True
+        self.assertFalse(site._registry[ApiKey].has_add_permission(request))
+
+
+class StreamEncodingTests(TestCase):
+    def test_sse_serializes_decimal_rows(self):
+        from decimal import Decimal
+
+        from chat.views_stream import _sse
+
+        event = _sse("rows", rows=[{"average_price": Decimal("19.9900")}])
+        payload = json.loads(event.removeprefix("data: ").strip())
+        self.assertEqual(payload["type"], "rows")
+        self.assertEqual(payload["rows"][0]["average_price"], "19.9900")
+
+    def test_stream_sends_decimal_rows_instead_of_json_error(self):
+        from decimal import Decimal
+
+        password = "CorrectHorseBattery9"
+        admin = User.objects.create_user(
+            username="avg@example.com",
+            email="avg@example.com",
+            password=password,
+        )
+        org = ensure_organization_for_user(admin, name="Avg Co", product_mode="chat")
+        org.llm_backend = "local"
+        org.save(update_fields=["llm_backend"])
+        WorkspaceConnection.objects.create(
+            user=admin,
+            organization=org,
+            kind=WorkspaceConnection.KIND_CHAT,
+            host="127.0.0.1",
+            db_name="shop",
+            db_user="reader",
+            allowed_tables=["products"],
+            allowed_columns={"products": ["price"]},
+        )
+        conversation = Conversation.objects.create(user=admin, title="Q")
+        message = Message.objects.create(
+            conversation=conversation, content="average product price", is_user=True
+        )
+        client = Client()
+        client.force_login(admin)
+
+        class FakeGraph:
+            def stream(self, state, config=None):
+                yield {
+                    "sql_generator": {
+                        "sql": "SELECT AVG(price) AS average_price FROM products"
+                    }
+                }
+                yield {
+                    "sql_executor": {
+                        "execution_result": {
+                            "success": True,
+                            "rows": [{"average_price": Decimal("42.50")}],
+                            "kind": "success",
+                        },
+                        "answer_kind": "success",
+                    }
+                }
+                yield {
+                    "result_formatter": {
+                        "final_answer": "The average product price is 42.50.",
+                        "answer_kind": "success",
+                    }
+                }
+
+        with patch(
+            "chat.views_stream.build_on_premise_graph", return_value=FakeGraph()
+        ):
+            response = client.get(
+                reverse("stream_chat", args=[conversation.id]),
+                {"message_id": message.id},
+            )
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.streaming_content).decode()
+        self.assertNotIn("not JSON serializable", body)
+        self.assertIn('"average_price": "42.50"', body)
 
 

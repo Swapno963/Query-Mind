@@ -1,0 +1,177 @@
+/* QueryMind theme for Django staff admin. Tokens match static/css/tokens.css. */
+
+html[data-theme="light"],
+:root {
+    --primary: #3730a3;
+    --secondary: #0f172a;
+    --accent: #c7d2fe;
+    --primary-fg: #fff;
+    --body-fg: #0f172a;
+    --body-bg: #f4f5f8;
+    --body-quiet-color: #5b6575;
+    --body-medium-color: #334155;
+    --body-loud-color: #020617;
+    --header-color: #e2e8f0;
+    --header-branding-color: #ffffff;
+    --header-bg: #0f172a;
+    --header-link-color: #e2e8f0;
+    --breadcrumbs-fg: #cbd5e1;
+    --breadcrumbs-link-fg: #ffffff;
+    --breadcrumbs-bg: #1e293b;
+    --link-fg: #3730a3;
+    --link-hover-color: #312e81;
+    --link-selected-fg: #3730a3;
+    --hairline-color: #e2e8f0;
+    --border-color: #e2e8f0;
+    --error-fg: #b91c1c;
+    --darkened-bg: #eef0f5;
+    --selected-bg: #e2e8f0;
+    --selected-row: #eef2ff;
+    --button-fg: #fff;
+    --button-bg: #3730a3;
+    --button-hover-bg: #312e81;
+    --default-button-bg: #312e81;
+    --default-button-hover-bg: #3730a3;
+    --delete-button-bg: #b91c1c;
+    --delete-button-hover-bg: #991b1b;
+    --font-family-primary: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+}
+
+html[data-theme="light"] {
+    --primary: #3730a3;
+    --secondary: #0f172a;
+    --accent: #c7d2fe;
+    --primary-fg: #fff;
+    --body-fg: #0f172a;
+    --body-bg: #f4f5f8;
+    --header-bg: #0f172a;
+    --header-branding-color: #ffffff;
+    --breadcrumbs-bg: #1e293b;
+    --link-fg: #3730a3;
+    --button-bg: #3730a3;
+    --selected-row: #eef2ff;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --primary: #4f46e5;
+        --secondary: #020617;
+        --accent: #a5b4fc;
+        --primary-fg: #f8fafc;
+        --body-fg: #e2e8f0;
+        --body-bg: #020617;
+        --body-quiet-color: #94a3b8;
+        --header-bg: #020617;
+        --header-color: #e2e8f0;
+        --header-branding-color: #ffffff;
+        --breadcrumbs-bg: #0f172a;
+        --breadcrumbs-fg: #cbd5e1;
+        --link-fg: #a5b4fc;
+        --link-hover-color: #c7d2fe;
+        --hairline-color: #1e293b;
+        --border-color: #334155;
+        --darkened-bg: #0f172a;
+        --selected-bg: #1e293b;
+        --selected-row: #1e1b4b;
+        --button-bg: #4f46e5;
+        --button-hover-bg: #4338ca;
+        --default-button-bg: #4f46e5;
+        --default-button-hover-bg: #6366f1;
+    }
+}
+
+html[data-theme="dark"] {
+    --primary: #4f46e5;
+    --secondary: #020617;
+    --accent: #a5b4fc;
+    --primary-fg: #f8fafc;
+    --body-fg: #e2e8f0;
+    --body-bg: #020617;
+    --body-quiet-color: #94a3b8;
+    --header-bg: #020617;
+    --header-color: #e2e8f0;
+    --header-branding-color: #ffffff;
+    --breadcrumbs-bg: #0f172a;
+    --breadcrumbs-fg: #cbd5e1;
+    --link-fg: #a5b4fc;
+    --link-hover-color: #c7d2fe;
+    --hairline-color: #1e293b;
+    --border-color: #334155;
+    --darkened-bg: #0f172a;
+    --selected-bg: #1e293b;
+    --selected-row: #1e1b4b;
+    --button-bg: #4f46e5;
+    --button-hover-bg: #4338ca;
+    --default-button-bg: #4f46e5;
+    --default-button-hover-bg: #6366f1;
+}
+
+#header {
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
+}
+
+.qm-admin-brand a {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    text-decoration: none;
+}
+
+.qm-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 10px;
+    background: #3730a3;
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.qm-title {
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--header-branding-color);
+}
+
+.module.qm-admin-intro {
+    margin-bottom: 1.25rem;
+    background: var(--darkened-bg);
+    border: 1px solid var(--hairline-color);
+    border-radius: 12px;
+    padding: 1rem 1.15rem 1.1rem;
+}
+
+.module.qm-admin-intro h2 {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--body-fg);
+    font-size: 0.95rem;
+}
+
+.module.qm-admin-intro p {
+    margin: 0.4rem 0 0;
+    color: var(--body-quiet-color);
+    max-width: 46rem;
+}
+
+.qm-login-hint {
+    max-width: 28rem;
+    margin: 0 0 1.1rem;
+    color: var(--body-quiet-color);
+    line-height: 1.45;
+}
+
+.qm-login-hint code {
+    font-size: 0.85em;
+}
+
+#branding h1,
+#branding h1 a:link,
+#branding h1 a:visited {
+    color: var(--header-branding-color);
+}

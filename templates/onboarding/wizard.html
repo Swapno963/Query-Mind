@@ -15,7 +15,7 @@
             <div class="page-meta">Chat answers questions in the app. API lets your systems call QueryMind. You can add the other product later.</div>
             {% elif track == "api" %}
             <h1 class="page-title">Connect the API database</h1>
-            <div class="page-meta">API uses an online model. Store credentials so QueryMind can reconnect after restart. This is separate from chat.</div>
+            <div class="page-meta">API can use a local or online model. Store credentials so QueryMind can reconnect after restart. This is separate from chat.</div>
             {% else %}
             <h1 class="page-title">Build your Database Knowledge Profile</h1>
             <div class="page-meta">QueryMind answers only after it understands your work and your data access rules.</div>
@@ -49,7 +49,7 @@
         {% if show_product_step %}
         <section class="wizard-step" data-step="1" data-role="product">
             <h2>What do you want to use?</h2>
-            <p class="lead">You can move from chat to both later. API is always an online model.</p>
+            <p class="lead">You can move from chat to both later. Chat and API can use a local Ollama model or an online Gemini model.</p>
             <div class="choice-grid">
                 {% if "chat" in selectable_products %}
                 <label><input type="radio" name="product" value="chat"{% if org_product_mode == "chat" or not org_product_mode %} checked{% endif %}> Chat</label>
@@ -66,8 +66,8 @@
 
         {% if show_llm_step %}
         <section class="wizard-step" data-role="llm">
-            <h2>Which model should chat use?</h2>
-            <p class="lead">Local runs on your machine with Ollama. Online uses Gemini with the server API key.</p>
+            <h2>Which model should QueryMind use?</h2>
+            <p class="lead">Local runs on your machine with Ollama. Online uses Gemini with the server API key. Chat and API both use this choice.</p>
             <div class="choice-grid">
                 <label><input type="radio" name="llm_backend" value="local"{% if org_llm_backend != "online" %} checked{% endif %}> Local (Ollama, qwen2.5:3b)</label>
                 <label><input type="radio" name="llm_backend" value="online"{% if org_llm_backend == "online" %} checked{% endif %}> Online (Gemini)</label>

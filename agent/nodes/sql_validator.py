@@ -1,5 +1,6 @@
 from typing import Any
 
+from agent.operation import requested_result_limit_for_state
 from connections.services.sql_validation import ReadOnlySQLExecutor
 from chat.api.chat_service import SQLFallbackInterceptor
 from connections.models import WorkspaceConnection
@@ -12,6 +13,7 @@ def sql_validator(state: QueryMindState) -> dict[str, Any]:
     allowed = {str(name).lower() for name in (state.allowed_tables or []) if name}
     allowed_columns = dict(state.allowed_columns or {})
     sql = state.sql or ""
+    requested_limit = requested_result_limit_for_state(state)
 
     if not allowed or not allowed_columns:
         error = "No allowed tables and columns. QueryMind will not run this query."
@@ -42,11 +44,11 @@ def sql_validator(state: QueryMindState) -> dict[str, Any]:
             workspace = WorkspaceConnection.objects.filter(pk=state.workspace_id).first()
             if workspace:
                 engine = normalize_engine(workspace.engine)
-        ReadOnlySQLExecutor(
+        rewritten = ReadOnlySQLExecutor(
             allowed_tables=allowed,
             allowed_columns=allowed_columns,
             engine=engine,
-        ).validate(sql)
+        ).normalized_sql(sql, requested_limit=requested_limit)
     except PermissionError as exc:
         return _invalid(str(exc), fail_closed=True, kind="unavailable")
     except ValueError as exc:
@@ -55,6 +57,7 @@ def sql_validator(state: QueryMindState) -> dict[str, Any]:
         return _invalid(str(exc), fail_closed=False, kind="invalid_sql")
 
     return {
+        "sql": rewritten,
         "validation_result": {
             "valid": True,
             "error": None,

@@ -94,7 +94,7 @@
         const columns = selectedColumns();
         const llm = (form.querySelector("input[name=llm_backend]:checked") || {}).value;
         reviewCard.innerHTML =
-            (llm ? "<p><strong>Chat model:</strong> " + (llm === "online" ? "Online (Gemini)" : "Local (Ollama)") + "</p>" : "") +
+            (llm ? "<p><strong>Model:</strong> " + (llm === "online" ? "Online (Gemini)" : "Local (Ollama)") + "</p>" : "") +
             "<p><strong>Work:</strong> " + industry + "</p>" +
             "<p>" + business + "</p>" +
             "<p><strong>Information you keep:</strong> " + (keeps.join(", ") || "Not specified") + "</p>" +
@@ -146,8 +146,6 @@
         }).then(function (result) {
             if (!result.data || !result.data.ok) {
                 showError((result.data && result.data.error) || "Could not connect to the database.");
-                discovered = [];
-                discoveredColumns = {};
                 return false;
             }
             discovered = (result.data.tables || []).map(function (name) {

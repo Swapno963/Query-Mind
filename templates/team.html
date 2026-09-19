@@ -22,8 +22,8 @@
     </p>
     {% endif %}
     <div class="review-card">
-        <h2>Products and chat model</h2>
-        <p class="page-meta">Only administrators can change this. Existing database connections are kept when you add a product.</p>
+        <h2>Products and model</h2>
+        <p class="page-meta">Only administrators can change this. Chat and API share this model. Existing database connections are kept when you add a product.</p>
         <form method="post">
             {% csrf_token %}
             <input type="hidden" name="action" value="save_product">
@@ -39,7 +39,7 @@
                 {% endif %}
             </div>
             <div class="field">
-                <label>Chat model</label>
+                <label>Model</label>
                 <div class="choice-grid" style="margin-top:.4rem;">
                     <label><input type="radio" name="llm_backend" value="local"{% if org_llm_backend != "online" %} checked{% endif %}> Local (Ollama)</label>
                     <label><input type="radio" name="llm_backend" value="online"{% if org_llm_backend == "online" %} checked{% endif %}> Online (Gemini)</label>
@@ -50,13 +50,13 @@
     </div>
     <div class="review-card">
         <h2>MCP server</h2>
-        <p class="page-meta">Writes (create, update, delete, business actions) only run through this server. Reads use MCP when a tool can satisfy the request; otherwise QueryMind uses the read-only SQL agent.</p>
+        <p class="page-meta">Writes (create, update, delete, business actions) only run through this server. For ServeEasy, use the public <code>/mcp</code> URL (not the Next.js origin). The API key you give ServeEasy must belong to this organization, not a platform superuser.{% if api_enabled %} Read the <a href="{% url 'mcp_docs' %}">MCP documentation</a>.{% endif %}</p>
         <form method="post">
             {% csrf_token %}
             <input type="hidden" name="action" value="save_mcp">
             <div class="field">
                 <label for="mcp_server_url">Server URL</label>
-                <input id="mcp_server_url" name="mcp_server_url" type="url" placeholder="https://example.com/mcp" value="{{ organization.mcp_server_url|default:'' }}">
+                <input id="mcp_server_url" name="mcp_server_url" type="url" placeholder="http://easyserve.clustorflow.com/mcp" value="{{ organization.mcp_server_url|default:'' }}">
             </div>
             <button class="btn btn-secondary" type="submit">Save MCP URL</button>
         </form>

@@ -43,6 +43,7 @@ chat_product_urlpatterns = [
 
 api_portal_urlpatterns = [
     path("developers/", views.DevelopersView.as_view(), name="developers"),
+    path("developers/mcp/", views.McpDocsView.as_view(), name="mcp_docs"),
 ]
 
 urlpatterns = (

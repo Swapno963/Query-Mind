@@ -147,11 +147,16 @@
             } else if (data.type === "error") {
                 eventSource.close();
                 finish();
-                if (statusDiv) statusDiv.hidden = true;
+                if (lastSql && sqlPanel) sqlPanel.hidden = false;
                 const message = String(data.content || "");
+                const rawDetail = String(data.detail || "");
+                const internal = /JSON serializable|Object of type|Traceback/i.test(message + " " + rawDetail);
                 let title = "QueryMind could not finish this answer";
                 let detail = "Try asking again in a moment. QueryMind will not invent database results.";
-                if (/connection lost|connect/i.test(message)) {
+                if (internal) {
+                    title = "QueryMind could not display this answer";
+                    detail = "The question was understood. Send it again in a moment.";
+                } else if (/connection lost|connect/i.test(message)) {
                     title = "Connection lost";
                     detail = "The live answer stream stopped. Send the question again.";
                 } else if (/not allowed|permission|unavailable/i.test(message)) {
@@ -170,14 +175,17 @@
                     } else if (code === "zero_rows") {
                         title = "No matching records";
                         detail = "The tables you allowed contain no matching rows for this question.";
+                    } else if (internal) {
+                        title = "QueryMind could not display this answer";
+                        detail = "The question was understood. Send it again in a moment.";
                     }
                     let html = errorCardHtml(title, detail);
-                    if (data.detail) {
+                    if (rawDetail && !internal) {
                         html += "<details class=\"how-answered\"><summary>Technical detail</summary><pre>" +
-                            String(data.detail).replace(/[<>]/g, "") + "</pre></details>";
+                            rawDetail.replace(/[<>]/g, "") + "</pre></details>";
                     }
                     errorDiv.innerHTML = html;
-                } else {
+                } else if (!aiContent) {
                     contentDiv.innerHTML = errorCardHtml(title, detail);
                 }
             }
@@ -212,13 +220,26 @@
         });
     }
 
-    document.body.addEventListener("htmx:afterSwap", function () {
+    document.body.addEventListener("htmx:afterSwap", function (event) {
         bootPendingStreams();
         highlightCode();
         scrollToBottom();
-        if (textarea) {
+        if (textarea && event.detail && event.detail.successful !== false) {
             textarea.value = "";
             resizeComposer();
+        }
+    });
+
+    document.body.addEventListener("htmx:responseError", function (event) {
+        if (!form || event.detail.elt !== form) return;
+        setWorking(false);
+        if (!hint) return;
+        const status = event.detail.xhr && event.detail.xhr.status;
+        const text = ((event.detail.xhr && event.detail.xhr.responseText) || "").trim();
+        if (status === 400) {
+            hint.textContent = text || "Enter a question before sending. Your conversation is unchanged.";
+        } else {
+            hint.textContent = "QueryMind could not send that question. Your conversation is unchanged.";
         }
     });
 

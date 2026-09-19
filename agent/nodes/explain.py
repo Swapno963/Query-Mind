@@ -1,5 +1,6 @@
 from typing import Any
 
+from agent.operation import requested_result_limit_for_state
 from connections.models import WorkspaceConnection
 
 from ..state import QueryMindState
@@ -9,6 +10,7 @@ def explain_sql(state: QueryMindState) -> dict[str, Any]:
     sql = state.sql or ""
     allowed = {str(name).lower() for name in (state.allowed_tables or []) if name}
     allowed_columns = dict(state.allowed_columns or {})
+    requested_limit = requested_result_limit_for_state(state)
     if not allowed or not allowed_columns:
         return _explain_invalid(
             "No allowed tables and columns. QueryMind will not run this query.",
@@ -34,8 +36,10 @@ def explain_sql(state: QueryMindState) -> dict[str, Any]:
         allowed_columns,
     )
     try:
-        result = executor.explain(sql)
+        result = executor.explain(sql, requested_limit=requested_limit)
+        rewritten = result.get("sql") or sql
         return {
+            "sql": rewritten,
             "explain_result": result,
             "database_error": None,
             "current_node": "explain_sql",

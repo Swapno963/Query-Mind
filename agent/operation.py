@@ -22,8 +22,28 @@ PARAM_ALIASES = {
     "orderid": "order_id",
     "customer_id": "customer_id",
     "product_id": "product_id",
+    "menu_item_id": "menu_item_id",
+    "menuitemid": "menu_item_id",
+    "category_id": "category_id",
+    "category_name": "category_name",
+    "category": "category_name",
+    "item_name": "name",
+    "name": "name",
+    "price": "price",
+    "description": "description",
     "status": "status",
     "limit": "limit",
+    "date": "date",
+    "payment_status": "payment_status",
+}
+
+IGNORED_PARAMS = {
+    "restaurant_id",
+    "restaurant",
+    "user_id",
+    "user",
+    "branch_id",
+    "branch",
 }
 
 _DELETE_RE = re.compile(r"\b(delete|remove|erase)\b", re.I)
@@ -39,7 +59,26 @@ _ORDER_ID_RE = re.compile(r"\border\s+#?(\d+)\b", re.I)
 _STATUS_RE = re.compile(r"\b(?:as|to|status)\s+([a-z][a-z_]+)\b", re.I)
 _LIMIT_RE = re.compile(r"\b(?:top|first|limit)\s+(\d+)\b", re.I)
 _RESOURCE_RE = re.compile(
-    r"\b(orders?|customers?|products?|users?|items?|invoices?)\b",
+    r"\b(menu\s*items?|categor(?:y|ies)|restaurants?|orders?|customers?|products?|users?|items?|invoices?)\b",
+    re.I,
+)
+_GREETING_RE = re.compile(
+    r"^\s*(hi|hello|hey+|yo|sup|hiya|good\s+(morning|afternoon|evening|night)|thanks|thank you|thx|ok|okay|cool|great|bye|goodbye|see you)[\s!.?,-]*$",
+    re.I,
+)
+_IDENTITY_RE = re.compile(
+    r"\b(who are you|what are you|what can you do|how (?:do you|does this) work|your name|help me)\b",
+    re.I,
+)
+_CHITCHAT_RE = re.compile(
+    r"\b(how are you|how's it going|how is it going|tell me a joke|good to (?:see|meet) you)\b",
+    re.I,
+)
+_DATA_RE = re.compile(
+    r"\b(show|list|get|find|display|fetch|count|how many|sum|total|average|avg|revenue|"
+    r"order|orders|product|products|customer|customers|table|tables|column|columns|"
+    r"database|sql|select|paid|unpaid|sales|inventory|menu|category|categories|"
+    r"who spent|which|top \d+|last month|this year)\b",
     re.I,
 )
 
@@ -68,6 +107,8 @@ def validate_operation_intent(intent: dict[str, Any] | None) -> dict[str, Any]:
     clean: dict[str, Any] = {}
     for key, value in params.items():
         alias = PARAM_ALIASES.get(str(key).lower().replace("-", "_"), str(key).lower())
+        if alias in IGNORED_PARAMS:
+            continue
         if value not in (None, ""):
             clean[alias] = value
     bound["parameters"] = clean
@@ -130,11 +171,38 @@ def extract_parameters(question: str) -> dict[str, Any]:
     return params
 
 
+def requested_result_limit(
+    intent: dict[str, Any] | None = None, question: str | None = None
+) -> int | None:
+    params: dict[str, Any] = {}
+    if isinstance(intent, dict):
+        raw = intent.get("parameters")
+        if isinstance(raw, dict):
+            params = raw
+    limit = params.get("limit")
+    if limit is None and question:
+        limit = extract_parameters(question).get("limit")
+    try:
+        n = int(limit)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def requested_result_limit_for_state(state: Any) -> int | None:
+    return requested_result_limit(
+        getattr(state, "intent", None), getattr(state, "question", None)
+    ) or requested_result_limit(getattr(state, "operation_intent", None))
+
+
 def extract_resource(question: str) -> str | None:
     match = _RESOURCE_RE.search(question or "")
     if not match:
         return None
-    return _singular(match.group(1).lower())
+    raw = match.group(1).lower().replace(" ", "_")
+    if raw.startswith("menu_item"):
+        return "item"
+    return _singular(raw)
 
 
 def _singular(name: str) -> str:
@@ -146,6 +214,81 @@ def _singular(name: str) -> str:
     if raw.endswith("s") and not raw.endswith("ss"):
         return raw[:-1]
     return raw
+
+
+def is_small_talk(question: str) -> bool:
+    q = (question or "").strip()
+    if not q:
+        return False
+    if mutation_verb_operation(q):
+        return False
+    if _GREETING_RE.match(q):
+        return True
+    if _CHITCHAT_RE.search(q) and not _DATA_RE.search(q):
+        return True
+    if _IDENTITY_RE.search(q) and not _DATA_RE.search(q):
+        return True
+    return False
+
+
+def looks_like_data_question(question: str) -> bool:
+    q = question or ""
+    if mutation_verb_operation(q):
+        return True
+    if _DATA_RE.search(q):
+        return True
+    if _READ_RE.search(q) and extract_resource(q):
+        return True
+    return False
+
+
+def classify_request_kind(
+    question: str,
+    *,
+    use_llm: bool = False,
+    backend: str = "local",
+) -> str:
+    """Return conversation or query. Conversation never enters SQL generation."""
+    q = (question or "").strip()
+    if not q:
+        return "conversation"
+    if is_small_talk(q):
+        return "conversation"
+    if looks_like_data_question(q) or _AMBIGUOUS_RE.search(q):
+        return "query"
+    if use_llm:
+        try:
+            return llm_request_kind(q, backend=backend)
+        except Exception:
+            pass
+    return "conversation"
+
+
+def llm_request_kind(question: str, *, backend: str = "local") -> str:
+    prompt = f"""
+Classify the user message. Return JSON only.
+
+kind is "conversation" when the user is greeting, thanking, chatting, or asking about you.
+kind is "query" when they want data looked up or a business record changed.
+
+MESSAGE:
+{question}
+
+Return: {{"kind": "conversation"}} or {{"kind": "query"}}
+""".strip()
+    raw = ask_llm(
+        prompt,
+        backend=backend,
+        temperature=0.0,
+        system="You emit JSON only.",
+    )
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+        return "conversation"
+    parsed = json.loads(raw[start : end + 1])
+    kind = str((parsed or {}).get("kind") or "").strip().lower()
+    return "query" if kind == "query" else "conversation"
 
 
 def mutation_verb_operation(question: str) -> str | None:
@@ -237,7 +380,9 @@ REQUEST:
     )
     start = raw.find("{")
     end = raw.rfind("}")
-    parsed = json.loads(raw[start : end + 1]) if start >= 0 and end > start else {}
+    if start < 0 or end <= start:
+        raise ValueError("LLM did not return JSON.")
+    parsed = json.loads(raw[start : end + 1])
     if not isinstance(parsed, dict):
         return empty_operation_intent() | {"reason": "needs_clarification"}
     if parsed.get("valid") is False:
@@ -256,20 +401,35 @@ def extract_operation(
 ) -> dict[str, Any]:
     forced = mutation_verb_operation(question)
     ruled = rule_based_operation(question)
-    if forced:
-        ruled["operation"] = forced
-        return validate_operation_intent(ruled)
-    if ruled.get("valid"):
-        return ruled
-    if ruled.get("reason") == "needs_clarification" and _AMBIGUOUS_RE.search(question or ""):
-        return ruled
     if not use_llm:
+        if forced:
+            ruled["operation"] = forced
+            return validate_operation_intent(ruled)
         return ruled
     try:
         llm = llm_operation(question, conversation_context, backend=backend)
     except Exception:
+        if forced:
+            ruled["operation"] = forced
+            return validate_operation_intent(ruled)
         return ruled
     if forced:
-        llm["operation"] = forced
-        return validate_operation_intent(llm)
+        source = dict(llm if llm.get("valid") else ruled)
+        source["operation"] = forced
+        if llm.get("valid"):
+            params = dict(ruled.get("parameters") or {})
+            params.update(llm.get("parameters") or {})
+            source["parameters"] = params
+            source["resource"] = llm.get("resource") or ruled.get("resource")
+        return validate_operation_intent(source)
+    if ruled.get("valid"):
+        if llm.get("valid") and llm.get("parameters"):
+            params = dict(ruled.get("parameters") or {})
+            params.update(llm.get("parameters") or {})
+            ruled["parameters"] = params
+            ruled["resource"] = llm.get("resource") or ruled.get("resource")
+            return validate_operation_intent(ruled)
+        return ruled
+    if ruled.get("reason") == "needs_clarification" and _AMBIGUOUS_RE.search(question or ""):
+        return ruled
     return llm

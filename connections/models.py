@@ -72,6 +72,8 @@ class WorkspaceConnection(models.Model):
                 name="unique_workspace_per_org_kind",
             ),
         ]
+        verbose_name = "workspace connection"
+        verbose_name_plural = "workspace connections"
 
     def __str__(self):
         label = self.db_name or self.kind
@@ -111,6 +113,8 @@ class VerifiedQueryExample(models.Model):
         indexes = [
             models.Index(fields=["workspace", "created_at"]),
         ]
+        verbose_name = "verified query example"
+        verbose_name_plural = "verified query examples"
 
     def __str__(self):
         return self.question[:80]

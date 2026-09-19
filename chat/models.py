@@ -142,6 +142,8 @@ class ApiAccessRequest(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        verbose_name = "API access request"
+        verbose_name_plural = "API access requests"
 
     def __str__(self):
         return f"{self.user} ({self.status})"
@@ -160,6 +162,8 @@ class ApiKey(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        verbose_name = "API key"
+        verbose_name_plural = "API keys"
 
     def __str__(self):
         return f"{self.prefix} ({self.user})"
@@ -213,6 +217,10 @@ class Organization(models.Model):
     def __str__(self):
         return self.name
 
+    class Meta:
+        verbose_name = "organization"
+        verbose_name_plural = "organizations"
+
 
 class OrganizationMembership(models.Model):
     ROLE_ADMIN = "admin"
@@ -243,6 +251,8 @@ class OrganizationMembership(models.Model):
                 name="unique_org_membership",
             ),
         ]
+        verbose_name = "membership"
+        verbose_name_plural = "memberships"
 
     def __str__(self):
         return f"{self.user} ({self.role}) in {self.organization}"

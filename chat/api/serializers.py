@@ -32,6 +32,7 @@ class AccessAllowListSerializer(serializers.Serializer):
 
 class MessageCreateSerializer(serializers.Serializer):
     content = serializers.CharField(required=True, allow_blank=False, trim_whitespace=True)
+    conversation_context = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class MessageResultSerializer(serializers.Serializer):

@@ -23,8 +23,36 @@ from connections.services.engines import normalize_engine
 from connections.services.schema_discovery import filter_schema_to_tables
 from connections.services.workspace import (
     WorkspaceConnectionError,
+    apply_workspace_allow_list,
     discover_live_schema,
 )
+
+
+def authenticate_with_email(request, email: str, password: str):
+    """Django stores createsuperuser username separately from email."""
+    email = (email or "").strip().lower()
+    if not email or not password:
+        return None
+    user = authenticate(request, username=email, password=password)
+    if user is not None:
+        return user
+    match = (
+        User.objects.filter(email__iexact=email).first()
+        or User.objects.filter(username__iexact=email).first()
+    )
+    if match is None:
+        return None
+    return authenticate(request, username=match.username, password=password)
+
+
+def user_for_login_email(email: str):
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    return (
+        User.objects.filter(username__iexact=email).first()
+        or User.objects.filter(email__iexact=email).first()
+    )
 from .product import (
     apply_llm_backend,
     apply_product_mode,
@@ -36,6 +64,7 @@ from .product import (
 
 from .api_keys import (
     generate_api_key,
+    set_api_access_status,
     set_org_api_access_status,
     user_has_approved_api_access,
 )
@@ -52,6 +81,7 @@ from .organizations import (
     ensure_organization_for_user,
     is_org_admin,
     is_org_member_active,
+    is_platform_admin,
     mcp_server_url_for,
     organization_for,
     set_member_active,
@@ -94,9 +124,9 @@ class LoginView(View):
     def post(self, request):
         email = (request.POST.get("email") or "").strip().lower()
         password = request.POST.get("password") or ""
-        user = authenticate(request, username=email, password=password)
+        user = authenticate_with_email(request, email, password)
         if user is None:
-            existing = User.objects.filter(username=email).first()
+            existing = user_for_login_email(email)
             inactive_membership = (
                 existing
                 and OrganizationMembership.objects.filter(
@@ -108,6 +138,9 @@ class LoginView(View):
                 return render(request, "auth/login.html", status=403)
             messages.error(request, "That email or password did not match.")
             return render(request, "auth/login.html", status=400)
+        if is_platform_admin(user):
+            login(request, user)
+            return redirect(post_login_redirect_name(user))
         if not is_org_member_active(user):
             membership = OrganizationMembership.objects.filter(user=user).first()
             if membership and not membership.is_active:
@@ -177,7 +210,7 @@ class AuthenticatedWorkspaceMixin(LoginRequiredMixin):
             if membership and not membership.is_active:
                 messages.error(request, "This account has been deactivated.")
                 return redirect("login")
-            if membership is None:
+            if membership is None and not is_platform_admin(request.user):
                 ensure_organization_for_user(request.user)
         return super().dispatch(request, *args, **kwargs)
 
@@ -189,9 +222,9 @@ class AdminRequiredMixin(AuthenticatedWorkspaceMixin):
             if membership and not membership.is_active:
                 messages.error(request, "This account has been deactivated.")
                 return redirect("login")
-            if membership is None:
+            if membership is None and not is_platform_admin(request.user):
                 ensure_organization_for_user(request.user)
-            if not is_org_admin(request.user):
+            if not is_org_admin(request.user) and not is_platform_admin(request.user):
                 messages.error(
                     request,
                     "Only an organization administrator can manage this setting.",
@@ -203,6 +236,8 @@ class AdminRequiredMixin(AuthenticatedWorkspaceMixin):
 class OrgChatRequiredMixin:
     def dispatch(self, request, *args, **kwargs):
         if request.user.is_authenticated:
+            if is_platform_admin(request.user) and settings.CHAT_ENABLED:
+                return super().dispatch(request, *args, **kwargs)
             org = organization_for(request.user)
             if not org_chat_enabled(org):
                 messages.error(request, "This organization does not use chat.")
@@ -213,6 +248,8 @@ class OrgChatRequiredMixin:
 class OrgApiRequiredMixin:
     def dispatch(self, request, *args, **kwargs):
         if request.user.is_authenticated:
+            if is_platform_admin(request.user) and settings.API_ENABLED:
+                return super().dispatch(request, *args, **kwargs)
             org = organization_for(request.user)
             if not org_api_enabled(org):
                 messages.error(request, "This organization does not use the API.")
@@ -256,7 +293,7 @@ def _wizard_plan(request, org):
         return {
             "wizard_kind": KIND_API,
             "show_product_step": False,
-            "show_llm_step": False,
+            "show_llm_step": True,
             "show_profile_steps": False,
             "show_db_steps": True,
             "track": "api",
@@ -430,15 +467,15 @@ class OnboardingView(AdminRequiredMixin, View):
         action = request.POST.get("action") or "save_connection"
         if action == "save_product":
             apply_product_mode(org, request.POST.get("product"))
+            if request.POST.get("llm_backend"):
+                apply_llm_backend(org, request.POST.get("llm_backend"))
             org.refresh_from_db()
             return redirect(_onboarding_next_url(org))
         plan = _wizard_plan(request, org)
         kind = KIND_API if plan["track"] == "api" else KIND_CHAT
-        if kind == KIND_CHAT:
-            backend = request.POST.get("llm_backend")
-            if backend:
-                apply_llm_backend(org, backend)
-                org.refresh_from_db()
+        if request.POST.get("llm_backend"):
+            apply_llm_backend(org, request.POST.get("llm_backend"))
+            org.refresh_from_db()
         workspace, error = _save_live_workspace(request, kind=kind)
         if error:
             messages.error(request, error)
@@ -461,6 +498,38 @@ class DataAccessView(AuthenticatedWorkspaceMixin, OrgChatRequiredMixin, View):
             "data_access.html",
             product_context(request, {"active_nav": "data"}),
         )
+
+    def post(self, request):
+        if not is_org_admin(request.user) and not is_platform_admin(request.user):
+            messages.error(request, "Only an organization administrator can change table access.")
+            return redirect("data_access")
+        workspace = workspace_for(request.user, KIND_CHAT)
+        if not chat_ready(workspace):
+            messages.error(request, "Connect a database first, then choose tables and columns.")
+            return redirect("onboarding")
+        allowed = request.POST.getlist("allowed_tables")
+        requested_columns: dict[str, list[str]] = {}
+        for pair in request.POST.getlist("allowed_columns"):
+            if "." not in pair:
+                continue
+            table, column = pair.split(".", 1)
+            requested_columns.setdefault(table, []).append(column)
+        try:
+            apply_workspace_allow_list(
+                workspace,
+                requested_tables=allowed,
+                requested_columns=requested_columns,
+            )
+        except WorkspaceConnectionError as exc:
+            messages.error(request, exc.user_message)
+            return render(
+                request,
+                "data_access.html",
+                product_context(request, {"active_nav": "data"}),
+                status=400,
+            )
+        messages.success(request, "Table and column access updated.")
+        return redirect("data_access")
 
 
 class DevelopersView(AuthenticatedWorkspaceMixin, OrgApiRequiredMixin, View):
@@ -497,6 +566,7 @@ class DevelopersView(AuthenticatedWorkspaceMixin, OrgApiRequiredMixin, View):
                     "api_keys": api_keys,
                     "revealed_api_key": revealed,
                     "api_origin": origin,
+                    "docs_kind": "api",
                 },
             ),
         )
@@ -521,6 +591,12 @@ class DevelopersView(AuthenticatedWorkspaceMixin, OrgApiRequiredMixin, View):
                 messages.error(
                     request,
                     "Your API access request has not been approved yet.",
+                )
+            elif organization_for(request.user) is None:
+                messages.error(
+                    request,
+                    "ServeEasy keys must belong to an organization admin. "
+                    "Create or sign in as that org user, save the ServeEasy /mcp URL on Team, then mint the key there.",
                 )
             else:
                 raw, prefix, hashed = generate_api_key()
@@ -571,9 +647,33 @@ class DevelopersView(AuthenticatedWorkspaceMixin, OrgApiRequiredMixin, View):
         )
 
 
+class McpDocsView(AuthenticatedWorkspaceMixin, OrgApiRequiredMixin, View):
+    def get(self, request):
+        origin = request.build_absolute_uri("/").rstrip("/")
+        return render(
+            request,
+            "mcp.html",
+            product_context(
+                request,
+                {
+                    "active_nav": "mcp",
+                    "docs_kind": "mcp",
+                    "api_origin": origin,
+                    "mcp_server_url": mcp_server_url_for(request.user),
+                },
+            ),
+        )
+
+
 class TeamView(AdminRequiredMixin, View):
     def get(self, request):
         org = organization_for(request.user)
+        if org is None:
+            messages.error(
+                request,
+                "Team and MCP URL are organization settings. Sign in as an organization admin.",
+            )
+            return redirect("dashboard")
         members = (
             OrganizationMembership.objects.filter(organization=org)
             .select_related("user")
@@ -598,9 +698,15 @@ class TeamView(AdminRequiredMixin, View):
     def post(self, request):
         action = request.POST.get("action")
         org = organization_for(request.user)
+        if org is None:
+            messages.error(
+                request,
+                "Team and MCP URL are organization settings. Sign in as an organization admin.",
+            )
+            return redirect("dashboard")
         if action == "save_product":
             apply_product_mode(org, request.POST.get("product"))
-            if request.POST.get("llm_backend") and org_chat_enabled(org):
+            if request.POST.get("llm_backend"):
                 apply_llm_backend(org, request.POST.get("llm_backend"))
             org.refresh_from_db()
             messages.success(request, "Product settings saved.")
@@ -610,10 +716,16 @@ class TeamView(AdminRequiredMixin, View):
             return redirect("team")
         if action == "save_llm":
             apply_llm_backend(org, request.POST.get("llm_backend"))
-            messages.success(request, "Chat model saved.")
+            messages.success(request, "Model saved.")
             return redirect("team")
         if action == "save_mcp":
             raw = (request.POST.get("mcp_server_url") or "").strip()
+            if org is None:
+                messages.error(
+                    request,
+                    "MCP URL belongs to an organization. Sign in as that organization's admin, then save the ServeEasy /mcp URL.",
+                )
+                return redirect("dashboard")
             if raw and not raw.startswith(("http://", "https://")):
                 messages.error(request, "MCP server URL must start with http:// or https://.")
                 return redirect("team")
@@ -686,7 +798,7 @@ class DashboardView(AdminRequiredMixin, View):
         action = request.POST.get("action")
         if action == "save_product":
             apply_product_mode(org, request.POST.get("product"))
-            if request.POST.get("llm_backend") and org_chat_enabled(org):
+            if request.POST.get("llm_backend"):
                 apply_llm_backend(org, request.POST.get("llm_backend"))
             org.refresh_from_db()
             messages.success(request, "Product settings saved.")
@@ -696,7 +808,7 @@ class DashboardView(AdminRequiredMixin, View):
             return redirect("dashboard")
         if action == "save_llm":
             apply_llm_backend(org, request.POST.get("llm_backend"))
-            messages.success(request, "Chat model saved.")
+            messages.success(request, "Model saved.")
             return redirect("dashboard")
         request_id = request.POST.get("request_id")
         if action == "approve_api":
@@ -708,7 +820,12 @@ class DashboardView(AdminRequiredMixin, View):
         else:
             return redirect("dashboard")
         try:
-            set_org_api_access_status(org=org, request_id=request_id, status=status)
+            set_api_access_status(
+                actor=request.user,
+                org=org,
+                request_id=request_id,
+                status=status,
+            )
         except ApiAccessRequest.DoesNotExist:
             messages.error(request, "That API access request was not found.")
             return redirect("dashboard")

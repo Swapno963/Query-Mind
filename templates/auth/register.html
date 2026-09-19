@@ -24,7 +24,7 @@
             <p class="auth-eyebrow">Get started</p>
             <h1>Create your workspace</h1>
             {% if chat_enabled and api_enabled %}
-            <p class="lead">Choose chat, API, or both. Chat needs a database connection. API uses an online model and a separate database connection.</p>
+            <p class="lead">Choose chat, API, or both. Chat needs a database connection. API uses a separate database connection. Both can use a local or online model.</p>
             {% elif api_enabled %}
             <p class="lead">Create an account to request API access. QueryMind stores the API database credentials so it can reconnect after restart.</p>
             {% else %}

@@ -7,12 +7,21 @@ from agent.policy import decide, resolve_mode
 from agent.state import QueryMindState
 
 
+def _sql_available(state: QueryMindState) -> bool:
+    if state.allowed_tables or (state.schema_text or "").strip():
+        return True
+    if (state.mcp_server_url or "").strip() and not state.allowed_tables:
+        return False
+    return True
+
+
 def capability_resolve(
     state: QueryMindState,
     tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     intent = state.operation_intent or {}
-    policy = decide(intent.get("operation"))
+    surface = getattr(state, "product_surface", "") or ""
+    policy = decide(intent.get("operation"), product_surface=surface)
     url = (state.mcp_server_url or "").strip()
     list_error = ""
     listed = tools
@@ -20,7 +29,7 @@ def capability_resolve(
     if listed is None:
         if url:
             try:
-                listed = list_tools(url)
+                listed = list_tools(url, getattr(state, "mcp_headers", None))
             except MCPClientError as exc:
                 listed = []
                 list_error = exc.message
@@ -28,6 +37,7 @@ def capability_resolve(
             listed = []
 
     match = first_matching_tool(intent, listed or [])
+    missing = (match or {}).get("missing") or []
     mcp_capable = bool(match and match.get("ok"))
     if provided:
         mcp_available = True
@@ -36,17 +46,23 @@ def capability_resolve(
     else:
         mcp_available = bool(url)
 
-    mode = resolve_mode(
-        operation=intent.get("operation"),
-        mcp_capable=mcp_capable,
-        mcp_available=mcp_available,
-    )
-    if mode == "mcp":
-        reason = (match or {}).get("reason") or "mcp"
-    elif mode == "sql":
-        reason = "mcp_cannot_satisfy"
+    if match and missing and not match.get("ok"):
+        mode = "clarify"
+        reason = "missing_parameters"
     else:
-        reason = list_error or "no_suitable_mcp_capability"
+        mode = resolve_mode(
+            operation=intent.get("operation"),
+            mcp_capable=mcp_capable,
+            mcp_available=mcp_available,
+            sql_available=_sql_available(state),
+            product_surface=surface,
+        )
+        if mode == "mcp":
+            reason = (match or {}).get("reason") or "mcp"
+        elif mode == "sql":
+            reason = "mcp_cannot_satisfy"
+        else:
+            reason = list_error or "no_suitable_mcp_capability"
 
     routing = {
         "operation": policy["operation"],
@@ -57,6 +73,7 @@ def capability_resolve(
         "sql_allowed": policy["sql_allowed"],
         "mcp_required": policy["mcp_required"],
         "arguments": redact((match or {}).get("arguments") or {}),
+        "missing": missing,
     }
     payload: dict[str, Any] = {
         "execution_mode": mode,
@@ -68,8 +85,13 @@ def capability_resolve(
         payload["mcp_result"] = {
             "tool": match.get("tool"),
             "arguments": match.get("arguments") or {},
+            "missing": missing,
         }
-    if mode == "deny":
+    if mode == "clarify":
+        payload["answer_kind"] = "needs_parameters"
+        payload["database_error"] = reason
+        payload["status"] = "failed"
+    elif mode == "deny":
         payload["answer_kind"] = "unsupported_operation"
         payload["database_error"] = reason
     return payload

@@ -1,11 +1,13 @@
 """Shared template context for QueryMind product UI."""
 
+from django.conf import settings
 from connections.models import WorkspaceConnection
 from connections.services.engines import ENGINE_CHOICES, display_name
 from chat.organizations import (
     active_membership,
     ensure_organization_for_user,
     is_org_admin,
+    is_platform_admin,
     organization_for,
 )
 from chat.product import (
@@ -121,19 +123,25 @@ def profile_from_workspace(workspace):
         return DEFAULT_PROFILE
     allowed = {str(name) for name in (workspace.allowed_tables or [])}
     allowed_columns = workspace.allowed_columns or {}
+    discovered_columns = workspace.discovered_columns or {}
+    table_names = list(workspace.discovered_tables or []) or list(workspace.allowed_tables or [])
     tables = []
-    for name in workspace.discovered_tables or []:
-        cols = allowed_columns.get(name) or []
+    for name in table_names:
+        all_cols = list(discovered_columns.get(name) or allowed_columns.get(name) or [])
+        selected = list(allowed_columns.get(name) or [])
+        selected_set = {str(col) for col in selected}
         tables.append(
             {
                 "name": name,
                 "description": (
-                    "Allowed by you: " + ", ".join(cols)
-                    if name in allowed and cols
+                    "Allowed by you: " + ", ".join(selected)
+                    if name in allowed and selected
                     else "Unavailable to QueryMind"
                 ),
-                "allowed": name in allowed and bool(cols),
-                "columns": cols,
+                "allowed": name in allowed and bool(selected),
+                "columns": selected,
+                "all_columns": all_cols,
+                "allowed_column_set": selected_set,
             }
         )
     host_label = (
@@ -174,9 +182,10 @@ def product_context(request, extra=None):
         workspace_for(user, KIND_API) if user and user.is_authenticated else None
     )
     org = organization_for(user) if user and user.is_authenticated else None
-    chat_on = org_chat_enabled(org) if org else False
-    api_on = org_api_enabled(org) if org else False
-    setup_step = next_setup_step(org) if org else None
+    platform = bool(user and user.is_authenticated and is_platform_admin(user))
+    chat_on = True if platform and settings.CHAT_ENABLED else (org_chat_enabled(org) if org else False)
+    api_on = True if platform and settings.API_ENABLED else (org_api_enabled(org) if org else False)
+    setup_step = None if platform else (next_setup_step(org) if org else None)
     context = {
         "recent_conversations": recent,
         "data_ready": data_ready,
@@ -194,12 +203,13 @@ def product_context(request, extra=None):
         "recent_limit": RECENT_CONVERSATIONS_LIMIT,
         "workspace": workspace,
         "is_org_admin": is_org_admin(user) if user and user.is_authenticated else False,
+        "is_platform_admin": platform,
         "organization": org,
         "membership": active_membership(user) if user and user.is_authenticated else None,
         "engine_choices": ENGINE_CHOICES,
         "chat_enabled": chat_on,
         "api_enabled": api_on,
-        "app_home_url_name": home_url_name(org) if org else "ask",
+        "app_home_url_name": "dashboard" if platform else (home_url_name(org) if org else "ask"),
         "org_product_mode": org_product_mode(org) if org else "",
         "org_llm_backend": org_llm_backend(org) if org else "",
         "selectable_products": selectable_products(),
@@ -208,6 +218,7 @@ def product_context(request, extra=None):
             user
             and user.is_authenticated
             and is_org_admin(user)
+            and not platform
             and setup_step
         ),
     }

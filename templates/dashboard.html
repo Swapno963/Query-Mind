@@ -9,14 +9,18 @@
             <i class="bi bi-list"></i>
         </button>
         <div>
-            <h1 class="page-title">Administrator dashboard</h1>
+            <h1 class="page-title">{% if dash_platform %}Staff dashboard{% else %}Administrator dashboard{% endif %}</h1>
             <div class="page-meta">
+                {% if dash_platform %}
+                Approve API access and manage QueryMind. Organization owners still manage their own team.
+                {% else %}
                 {{ dash_org.name }} — overview of this organization and everything you can manage.
+                {% endif %}
             </div>
         </div>
     </div>
     <div class="header-chips">
-        <span class="chip">Administrator</span>
+        <span class="chip">{% if dash_platform %}Super administrator{% else %}Administrator{% endif %}</span>
         {% if dash_readonly %}
         <span class="chip chip-success"><i class="bi bi-shield-check"></i> Read-only database</span>
         {% endif %}
@@ -39,10 +43,10 @@
     </div>
     {% endfor %}
 
-    {% if selectable_products|length > 1 %}
+    {% if selectable_products|length > 1 and not dash_platform %}
     <section class="review-card">
-        <h2>Products and chat model</h2>
-        <p class="page-meta">Chat can use a local or online model. API always uses an online model. Moving from chat to both keeps the chat database.</p>
+        <h2>Products and model</h2>
+        <p class="page-meta">Chat and API can use a local Ollama model or an online Gemini model. Moving from chat to both keeps the chat database.</p>
         <form method="post">
             {% csrf_token %}
             <input type="hidden" name="action" value="save_product">
@@ -57,15 +61,13 @@
                 <label><input type="radio" name="product" value="both"{% if org_product_mode == "both" %} checked{% endif %}> Both</label>
                 {% endif %}
             </div>
-            {% if chat_enabled or org_product_mode == "chat" or org_product_mode == "both" %}
             <div class="field">
-                <label>Chat model</label>
+                <label>Model</label>
                 <div class="choice-grid" style="margin-top:.4rem;">
                     <label><input type="radio" name="llm_backend" value="local"{% if org_llm_backend != "online" %} checked{% endif %}> Local (Ollama)</label>
                     <label><input type="radio" name="llm_backend" value="online"{% if org_llm_backend == "online" %} checked{% endif %}> Online (Gemini)</label>
                 </div>
             </div>
-            {% endif %}
             <button class="btn btn-primary" type="submit">Save products</button>
         </form>
     </section>
@@ -94,7 +96,13 @@
     {% endif %}
 
     <h2 class="dash-heading">Actions you can take</h2>
-    <p class="page-meta dash-lead">These are the administrator controls for this organization. Users you create cannot open this page.</p>
+    <p class="page-meta dash-lead">
+        {% if dash_platform %}
+        These are QueryMind staff controls. Organization administrators still create their own users.
+        {% else %}
+        These are the administrator controls for this organization. Users you create cannot open this page.
+        {% endif %}
+    </p>
     <section class="dash-actions">
         {% for action in dash_actions %}
         <article class="dash-action">
@@ -125,15 +133,15 @@
             {% endfor %}
         </section>
 
-        {% if api_enabled %}
+        {% if api_enabled or dash_platform %}
         <section class="review-card" id="api-requests">
             <h2>API access requests</h2>
-            <p class="page-meta">Approve a request before that person can create keys. Denied requests can ask again from the API page.</p>
+            <p class="page-meta">{% if dash_platform %}Approve a request from any organization before that person can create keys.{% else %}Approve a request before that person can create keys. Denied requests can ask again from the API page.{% endif %}</p>
             {% for access in dash_pending_api %}
             <div class="table-row">
                 <div>
                     <strong>{{ access.user.get_full_name|default:access.user.email }}</strong>
-                    <div class="page-meta">{{ access.user.email }} · {{ access.created_at|date:"M j, Y" }}</div>
+                    <div class="page-meta">{{ access.user.email }} · {{ access.created_at|date:"M j, Y" }}{% for membership in access.user.org_memberships.all %} · {{ membership.organization.name }}{% endfor %}</div>
                     {% if access.note %}<div class="page-meta">{{ access.note }}</div>{% endif %}
                 </div>
                 <div class="dash-request-actions">

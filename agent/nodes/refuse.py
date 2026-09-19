@@ -18,10 +18,16 @@ REFUSAL_MESSAGES = {
         "QueryMind could not connect to your database. Check the connection from Your data."
     ),
     "needs_clarification": (
-        "QueryMind needs a clearer request. Say whether you want to look up, create, update, or delete something."
+        "QueryMind needs a clearer lookup. Ask what you want to see from the tables you allowed."
+    ),
+    "needs_parameters": (
+        "QueryMind needs a bit more information before it can continue."
     ),
     "unsupported_operation": (
         "QueryMind cannot perform that operation. Writes must use a configured MCP tool; SQL cannot change data."
+    ),
+    "chat_read_only": (
+        "QueryMind chat can only look up data. It cannot create, update, or delete records."
     ),
     "mcp_failed": (
         "QueryMind could not complete that operation through MCP. It will not fall back to SQL for writes."
@@ -40,7 +46,20 @@ def refuse_answer(state: QueryMindState) -> dict[str, Any]:
     )
     if kind == "no_allow_list":
         kind = "unavailable"
-    message = REFUSAL_MESSAGES.get(kind, REFUSAL_MESSAGES["unavailable"])
+    surface = getattr(state, "product_surface", "") or ""
+    routing_reason = (state.routing or {}).get("reason") or ""
+    if surface == "chat" and (
+        kind == "unsupported_operation" or routing_reason in {"chat_read_only", "unsupported_operation"}
+    ):
+        message = REFUSAL_MESSAGES["chat_read_only"]
+        kind = "unsupported_operation"
+    else:
+        message = REFUSAL_MESSAGES.get(kind, REFUSAL_MESSAGES["unavailable"])
+    if kind == "needs_parameters":
+        missing = (state.routing or {}).get("missing") or []
+        if missing:
+            pretty = ", ".join(str(item).replace("_", " ") for item in missing)
+            message = f"I still need: {pretty}."
     detail = state.validation_error or state.database_error
     return {
         "final_answer": message,

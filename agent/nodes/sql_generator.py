@@ -6,7 +6,7 @@ from connections.services.fewshot import retrieve_examples
 from connections.services.prompt import PromptGenerator
 from connections.services.sql_critic import rank_sql_candidates
 from connections.services.engines import sql_language_name, sqlglot_dialect
-from chat.api.chat_service import ChatService
+from agent.llm import ask_state
 from ..intent import is_hard_query
 
 from ..state import QueryMindState
@@ -18,14 +18,14 @@ def _sql_system(engine: str) -> str:
 
 
 def sql_generator(state: QueryMindState) -> dict[str, Any]:
-    return _generate(state, on_premise=False)
+    return _generate(state)
 
 
 def sql_generator_on_premise(state: QueryMindState) -> dict[str, Any]:
-    return _generate(state, on_premise=True)
+    return _generate(state)
 
 
-def _generate(state: QueryMindState, *, on_premise: bool) -> dict[str, Any]:
+def _generate(state: QueryMindState) -> dict[str, Any]:
     question = (state.question or "").strip()
     if not question:
         return {
@@ -67,21 +67,21 @@ def _generate(state: QueryMindState, *, on_premise: bool) -> dict[str, Any]:
             examples=examples,
             sql_language=sql_language_name(state.engine),
         )
-        ask = ChatService.ask_on_premise_ai if on_premise else ChatService.ask_ai
-        kwargs = {}
+        backend = (getattr(state, "llm_backend", None) or "local").strip().lower()
+        local = backend != "online"
         system = _sql_system(state.engine)
-        if on_premise:
-            kwargs = {"temperature": 0.05, "system": system}
-        primary = _clean_sql(ask(prompt, **kwargs) if on_premise else ask(prompt))
+        kwargs = {"temperature": 0.05, "system": system} if local else {}
+        primary = _clean_sql(ask_state(state, prompt, **kwargs))
         candidates = [primary] if primary else []
         need_more = is_hard_query(state.intent) or bool(
             (state.critic_result or {}).get("issues")
             or (state.explain_result or {}).get("ok") is False
         )
-        if on_premise and need_more:
+        if local and need_more:
             for _ in range(2):
                 extra = _clean_sql(
-                    ChatService.ask_on_premise_ai(
+                    ask_state(
+                        state,
                         prompt,
                         temperature=0.3,
                         system=system,
