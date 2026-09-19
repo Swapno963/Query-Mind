@@ -17,17 +17,20 @@ def generate_api_key() -> tuple[str, str, str]:
     return raw, prefix, hash_api_key(raw)
 
 
-def user_has_approved_api_access(user) -> bool:
+def user_has_approved_api_access(user, kind: str | None = None) -> bool:
     if not user or not user.is_authenticated:
         return False
     from chat.organizations import is_platform_admin
 
     if is_platform_admin(user):
         return True
-    return ApiAccessRequest.objects.filter(
+    qs = ApiAccessRequest.objects.filter(
         user=user,
         status=ApiAccessRequest.STATUS_APPROVED,
-    ).exists()
+    )
+    if kind:
+        qs = qs.filter(kind=kind)
+    return qs.exists()
 
 
 def set_api_access_status(*, actor, request_id, status: str, org=None) -> ApiAccessRequest:

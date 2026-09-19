@@ -2,7 +2,7 @@ from rest_framework.permissions import BasePermission
 
 from chat.models import ApiKey
 from chat.organizations import organization_for
-from chat.product import org_api_enabled
+from chat.product import org_keys_enabled
 
 
 class IsApiKeyAuthenticated(BasePermission):
@@ -11,4 +11,4 @@ class IsApiKeyAuthenticated(BasePermission):
     def has_permission(self, request, view):
         if not isinstance(getattr(request, "auth", None), ApiKey):
             return False
-        return org_api_enabled(organization_for(request.user))
+        return org_keys_enabled(organization_for(request.user))

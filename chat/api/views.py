@@ -3,6 +3,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
 
+import logging
+
 from agent.graph import GRAPH_RUN_CONFIG, build_api_query_graph
 from agent.state import QueryMindState
 from chat.api.chat_service import ChatService
@@ -18,11 +20,12 @@ from chat.api.serializers import (
     ProfileSerializer,
 )
 from chat.api_keys import generate_api_key, user_has_approved_api_access
+from chat.authentication import mcp_headers_for_user
 from chat.models import ApiAccessRequest, ApiKey, Conversation, Message
 from chat.permissions import IsApiKeyAuthenticated
 from chat.services import ConversationService
 from chat.organizations import is_org_admin, mcp_server_url_for, organization_for
-from chat.product import org_api_enabled, org_llm_backend
+from chat.product import key_kind_for_org, org_keys_enabled, org_llm_backend
 from chat.ui import KIND_API, api_ready, get_or_create_workspace as create_workspace, workspace_for
 from connections.models import WorkspaceConnection
 from connections.services.catalog import (
@@ -35,12 +38,14 @@ from connections.services.engines import display_name, normalize_engine
 from connections.services.schema_discovery import filter_schema_to_tables
 from connections.services.workspace import refresh_workspace_schema
 
+logger = logging.getLogger("querymind.api")
+
 
 def require_org_api(user):
-    if not org_api_enabled(organization_for(user)):
+    if not org_keys_enabled(organization_for(user)):
         return api_error(
             "permission_error",
-            "This organization does not use the API.",
+            "This organization does not use the API or MCP.",
             403,
         )
     return None
@@ -105,12 +110,14 @@ class AccessRequestView(APIView):
         if user_has_approved_api_access(request.user):
             return Response({"status": ApiAccessRequest.STATUS_APPROVED, "approved": True})
         pending = request.user.api_access_requests.filter(
+            kind=key_kind_for_org(organization_for(request.user)),
             status=ApiAccessRequest.STATUS_PENDING
         ).first()
         if pending:
             return Response({"id": pending.id, "status": pending.status}, status=status.HTTP_200_OK)
         created = ApiAccessRequest.objects.create(
             user=request.user,
+            kind=key_kind_for_org(organization_for(request.user)),
             note=serializer.validated_data.get("note") or "",
         )
         return Response(
@@ -294,15 +301,6 @@ class WorkspaceView(APIView):
         return Response(workspace_payload(workspace))
 
 
-def _mcp_headers_from_request(request) -> dict[str, str]:
-    token = request.headers.get("X-MCP-Authorization") or request.headers.get("x-mcp-authorization") or ""
-    if not token:
-        return {}
-    if not token.lower().startswith("bearer "):
-        token = f"Bearer {token}"
-    return {"Authorization": token}
-
-
 def _run_sql_generation(user, content: str, conversation_context: str = "", mcp_headers=None):
     workspace = workspace_for(user, KIND_API)
     mcp_url = mcp_server_url_for(user)
@@ -459,10 +457,26 @@ class MessagesView(APIView):
             request.user,
             serializer.validated_data["content"],
             serializer.validated_data.get("conversation_context") or "",
-            _mcp_headers_from_request(request),
+            mcp_headers_for_user(request.user, request),
         )
         if error:
+            logger.warning(
+                "messages failed user=%s question=%r error=%s",
+                getattr(request.user, "id", None),
+                (serializer.validated_data.get("content") or "")[:160],
+                getattr(error, "data", error),
+            )
             return error
+        routing = payload.get("routing") or {}
+        logger.info(
+            "messages ok user=%s stop_reason=%s mode=%s tool=%s reason=%s question=%r",
+            getattr(request.user, "id", None),
+            payload.get("stop_reason"),
+            routing.get("mode"),
+            routing.get("tool") or "",
+            routing.get("reason") or "",
+            (serializer.validated_data.get("content") or "")[:160],
+        )
         return Response(payload, status=status.HTTP_200_OK)
 
 
@@ -487,10 +501,16 @@ class MessageResultsView(APIView):
             )
         except Message.DoesNotExist:
             return api_error("not_found_error", "That user message was not found.", 404)
+        from connections.services.sql_validation import DEFAULT_RESULT_LIMIT
+
+        rows = serializer.validated_data["rows"] or []
+        if not isinstance(rows, list):
+            rows = []
+        rows = [row for row in rows if isinstance(row, dict)][:DEFAULT_RESULT_LIMIT]
         result = ChatService.process_Result(
             conversation=user_message.conversation,
             user_message=user_message.content,
-            result=serializer.validated_data["rows"],
+            result=rows,
         )
         answer = (result.get("answer") or "").strip() or (
             "No matching records in the tables you allowed."
@@ -522,7 +542,7 @@ class ChatAPIView(APIView):
             request.user,
             serializer.validated_data["message"],
             "",
-            _mcp_headers_from_request(request),
+            mcp_headers_for_user(request.user, request),
         )
         if error:
             return error

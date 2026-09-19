@@ -625,6 +625,18 @@
     cursor: pointer;
 }
 
+.product-panel {
+    margin: 0.35rem 0 0.85rem;
+    padding: 0.75rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #f8fafc;
+}
+
+.product-panel[hidden] {
+    display: none;
+}
+
 .auth-switch {
     margin-top: 1rem;
     font-size: 0.88rem;

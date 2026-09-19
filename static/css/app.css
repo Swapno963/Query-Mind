@@ -449,6 +449,41 @@
     user-select: all;
 }
 
+.qm-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.25rem;
+}
+
+.qm-modal[hidden] {
+    display: none;
+}
+
+.qm-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.qm-modal-card {
+    position: relative;
+    z-index: 1;
+    width: min(28rem, 100%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem 1.35rem 1.4rem;
+    box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
+}
+
+body.qm-modal-open {
+    overflow: hidden;
+}
+
 @media (max-width: 900px) {
     .docs-layout {
         grid-template-columns: 1fr;

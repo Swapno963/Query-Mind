@@ -1,0 +1,15 @@
+{% if selectable_products|length > 1 %}
+<div class="choice-grid"{% if grid_style %} style="{{ grid_style }}"{% endif %}>
+    {% if "chat" in selectable_products %}
+    <label><input type="radio" name="product" value="chat"{% if selected_product == "chat" or not selected_product %} checked{% endif %}> Chat</label>
+    {% endif %}
+    {% if "api" in selectable_products %}
+    <label><input type="radio" name="product" value="api"{% if selected_product == "api" %} checked{% endif %}> API</label>
+    {% endif %}
+    {% if "mcp" in selectable_products %}
+    <label><input type="radio" name="product" value="mcp"{% if selected_product == "mcp" %} checked{% endif %}> MCP</label>
+    {% endif %}
+</div>
+{% else %}
+<input type="hidden" name="product" value="{{ selected_product }}">
+{% endif %}

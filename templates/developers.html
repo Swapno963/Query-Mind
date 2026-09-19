@@ -1,4 +1,5 @@
 {% extends "app_base.html" %}
+{% load static %}
 
 {% block title %}API — QueryMind{% endblock %}
 
@@ -10,11 +11,13 @@
         </button>
         <div>
             <h1 class="page-title">QueryMind API</h1>
-            <div class="page-meta">API can use a local or online model. Database credentials are stored so QueryMind can reconnect after restart. This connection is separate from chat. MCP is documented separately.</div>
+            <div class="page-meta">API can use a local or online model. Database credentials are stored so QueryMind can reconnect after restart. Request a key, wait for approval, then copy it with your password.</div>
         </div>
     </div>
     <div class="docs-header-actions">
+        {% if is_platform_admin %}
         {% include "includes/docs_switch.html" %}
+        {% endif %}
         {% if api_approved %}
         <span class="chip chip-success">Access approved</span>
         {% elif api_status == "pending" %}
@@ -35,64 +38,7 @@
 
     <div class="docs-layout">
         <div class="docs-main">
-            <div class="review-card" id="request-access">
-                <h2 class="page-title" style="margin-bottom:.5rem;">1. Request access</h2>
-                <p>Staff must approve your account before a key can be created. Chat setup is not required.</p>
-                {% if not api_approved %}
-                <form method="post" action="{% url 'developers' %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="request">
-                    <div class="field">
-                        <label for="note">Note (optional)</label>
-                        <textarea id="note" name="note" rows="2" placeholder="How you plan to use the API"></textarea>
-                    </div>
-                    <button class="btn btn-primary" type="submit" {% if api_status == "pending" %}disabled{% endif %}>
-                        {% if api_status == "pending" %}Waiting for approval{% else %}Request API access{% endif %}
-                    </button>
-                </form>
-                {% else %}
-                <p class="page-meta">Approved. Create a key, then follow the requests below.</p>
-                {% endif %}
-            </div>
-
-            <div class="review-card" id="create-key">
-                <h2 class="page-title" style="margin-bottom:.5rem;">2. Create a key</h2>
-                <p>Send it as <code>x-api-key</code> or <code>Authorization: Bearer</code>. Identity is the key’s user. Do not send a <code>user_id</code>.</p>
-                {% if revealed_api_key %}
-                <div class="api-key-reveal">
-                    <p class="page-meta">Copy it now. QueryMind will not show the secret again.</p>
-                    <pre class="docs-pre api-key-secret"><code>{{ revealed_api_key }}</code></pre>
-                </div>
-                {% endif %}
-                {% if api_keys %}
-                <ul class="api-key-list">
-                    {% for key in api_keys %}
-                    <li class="api-key-row">
-                        <code class="api-key-mask">{{ key.masked }}</code>
-                        {% if key.can_reveal %}
-                        <form class="api-key-reveal-form" method="post" action="{% url 'developers' %}">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="reveal_key">
-                            <input type="hidden" name="key_id" value="{{ key.id }}">
-                            <label class="sr-only" for="reveal-password-{{ key.id }}">Password</label>
-                            <input id="reveal-password-{{ key.id }}" type="password" name="password" required placeholder="Your password" autocomplete="current-password">
-                            <button class="btn btn-primary" type="submit">Copy secret</button>
-                        </form>
-                        {% elif not revealed_api_key %}
-                        <p class="page-meta">Secret is no longer stored. Create a new key.</p>
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-                {% if api_approved %}
-                <form method="post" action="{% url 'developers' %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="create_key">
-                    <button class="btn btn-primary" type="submit">Create API key</button>
-                </form>
-                {% endif %}
-            </div>
+            {% include "includes/key_request.html" with key_action_url=request.path %}
 
             <div class="review-card" id="authentication">
                 <h2 class="page-title" style="margin-bottom:.5rem;">Authentication</h2>
@@ -331,8 +277,7 @@
 
         <nav class="docs-toc" aria-label="On this page">
             <h2>On this page</h2>
-            <a href="#request-access">Request access</a>
-            <a href="#create-key">Create a key</a>
+            <a href="#request-access">API key</a>
             <div class="docs-toc-sub">
                 <a href="#authentication">Authentication</a>
                 <a href="#errors">Errors</a>
@@ -344,4 +289,8 @@
         </nav>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/key-copy.js' %}"></script>
 {% endblock %}

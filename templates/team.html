@@ -23,21 +23,11 @@
     {% endif %}
     <div class="review-card">
         <h2>Products and model</h2>
-        <p class="page-meta">Only administrators can change this. Chat and API share this model. Existing database connections are kept when you add a product.</p>
+        <p class="page-meta">Only administrators can change this. Chat, API, and MCP share this model. Existing database connections are kept when you change product.</p>
         <form method="post">
             {% csrf_token %}
             <input type="hidden" name="action" value="save_product">
-            <div class="choice-grid" style="margin:.75rem 0;">
-                {% if "chat" in selectable_products %}
-                <label><input type="radio" name="product" value="chat"{% if org_product_mode == "chat" %} checked{% endif %}> Chat</label>
-                {% endif %}
-                {% if "api" in selectable_products %}
-                <label><input type="radio" name="product" value="api"{% if org_product_mode == "api" %} checked{% endif %}> API</label>
-                {% endif %}
-                {% if "both" in selectable_products %}
-                <label><input type="radio" name="product" value="both"{% if org_product_mode == "both" %} checked{% endif %}> Both</label>
-                {% endif %}
-            </div>
+            {% include "includes/product_choice.html" with selected_product=org_product_mode grid_style="margin:.75rem 0;" %}
             <div class="field">
                 <label>Model</label>
                 <div class="choice-grid" style="margin-top:.4rem;">
@@ -50,7 +40,7 @@
     </div>
     <div class="review-card">
         <h2>MCP server</h2>
-        <p class="page-meta">Writes (create, update, delete, business actions) only run through this server. For ServeEasy, use the public <code>/mcp</code> URL (not the Next.js origin). The API key you give ServeEasy must belong to this organization, not a platform superuser.{% if api_enabled %} Read the <a href="{% url 'mcp_docs' %}">MCP documentation</a>.{% endif %}</p>
+        <p class="page-meta">Writes (create, update, delete, business actions) only run through this server. For ServeEasy, use the public <code>/mcp</code> URL (not the Next.js origin). The key you give ServeEasy must belong to this organization, not a platform superuser.{% if mcp_enabled %} Read the <a href="{% url 'mcp_docs' %}">MCP documentation</a>.{% endif %}</p>
         <form method="post">
             {% csrf_token %}
             <input type="hidden" name="action" value="save_mcp">
@@ -58,6 +48,16 @@
                 <label for="mcp_server_url">Server URL</label>
                 <input id="mcp_server_url" name="mcp_server_url" type="url" placeholder="http://easyserve.clustorflow.com/mcp" value="{{ organization.mcp_server_url|default:'' }}">
             </div>
+            <div class="field">
+                <label for="mcp_access_token">Restaurant access token (optional)</label>
+                <input id="mcp_access_token" name="mcp_access_token" type="password" autocomplete="new-password" placeholder="{% if mcp_token_configured %}Token saved — leave blank to keep it{% else %}Paste a ServeEasy access token for chat reads{% endif %}">
+                <p class="page-meta">Stored encrypted. QueryMind never shows it again. Chat uses it for MCP reads when no request header is sent. Leave blank to keep the current token.</p>
+            </div>
+            {% if mcp_token_configured %}
+            <div class="field">
+                <label><input type="checkbox" name="clear_mcp_access_token" value="1"> Remove stored token</label>
+            </div>
+            {% endif %}
             <button class="btn btn-secondary" type="submit">Save MCP URL</button>
         </form>
     </div>

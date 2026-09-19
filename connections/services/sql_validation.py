@@ -18,6 +18,42 @@ from connections.services.engines import (
 from connections.services.jsonutil import json_safe_row
 
 DEFAULT_RESULT_LIMIT = 100
+DENIED_SQL_FUNCTIONS = frozenset(
+    {
+        "pg_sleep",
+        "pg_read_file",
+        "pg_write_file",
+        "pg_ls_dir",
+        "dblink",
+        "dblink_exec",
+        "lo_import",
+        "lo_export",
+        "lo_get",
+        "load_file",
+        "sleep",
+        "xp_cmdshell",
+        "openrowset",
+    }
+)
+
+
+def _sql_function_name(node: exp.Expression) -> str:
+    raw = ""
+    if isinstance(node, exp.Anonymous):
+        this = node.this
+        if isinstance(this, exp.Dot):
+            raw = str(this.name or this)
+        elif isinstance(this, exp.Identifier):
+            raw = str(this.name or "")
+        else:
+            raw = str(this or "")
+    elif isinstance(node, exp.Func):
+        sql_name = getattr(node, "sql_name", None)
+        raw = sql_name() if callable(sql_name) else str(node.key or "")
+    name = raw.lower().strip().strip('"')
+    if "." in name:
+        name = name.rsplit(".", 1)[-1]
+    return name
 
 
 def cap_result_limit(
@@ -131,12 +167,27 @@ class ReadOnlySQLExecutor:
             raise ValueError(
                 f"Only SELECT queries are allowed. Received: {expression.key}"
             )
+        self._validate_denied_functions(expression)
         self._validate_tables(expression)
         for select in reversed(list(expression.find_all(exp.Select))):
             self._expand_select_stars(select)
         self._validate_columns(expression)
         self._apply_result_limit(expression, requested_limit)
         return expression
+
+    def _validate_denied_functions(self, expression: exp.Expression) -> None:
+        nodes = list(expression.find_all(exp.Func))
+        if hasattr(exp, "Anonymous"):
+            nodes.extend(expression.find_all(exp.Anonymous))
+        seen: set[int] = set()
+        for node in nodes:
+            ident = id(node)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            name = _sql_function_name(node)
+            if name in DENIED_SQL_FUNCTIONS:
+                raise PermissionError(f"Function {name} is not allowed.")
 
     def _validate_tables(self, expression: exp.Expression) -> None:
         if not self.allowed_tables:
@@ -332,14 +383,19 @@ class ReadOnlySQLExecutor:
         expression.limit(cap, copy=False)
 
     def _apply_read_only(self, cursor) -> None:
-        try:
-            if self.engine == ENGINE_POSTGRES:
+        if self.engine == ENGINE_POSTGRES:
+            try:
                 cursor.execute("SET TRANSACTION READ ONLY")
                 cursor.execute(
                     "SET LOCAL statement_timeout = %s",
                     [self.statement_timeout_ms],
                 )
-                return
+            except Exception as exc:
+                raise PermissionError(
+                    "Could not start a read-only database session."
+                ) from exc
+            return
+        try:
             if self.engine == ENGINE_MYSQL:
                 cursor.execute("START TRANSACTION READ ONLY")
                 try:

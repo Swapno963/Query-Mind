@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from django.conf import settings
 
-from DjangoForAI.app_mode import allowed_product_modes, resolve_signup_product
+from DjangoForAI.app_mode import (
+    PRODUCT_API,
+    PRODUCT_BOTH,
+    PRODUCT_CHAT,
+    PRODUCT_MCP,
+    PRODUCT_MODES,
+    allowed_product_modes,
+    resolve_signup_product,
+)
 from connections.models import WorkspaceConnection
 
 KIND_CHAT = WorkspaceConnection.KIND_CHAT
@@ -41,9 +49,11 @@ def clamp_llm_backend(requested: str | None) -> str:
 
 def org_product_mode(org) -> str:
     mode = (getattr(org, "product_mode", None) or "").strip().lower()
-    if mode in {"chat", "api", "both"}:
-        return clamp_product_mode(mode)
-    if settings.CHAT_ENABLED and settings.API_ENABLED:
+    if mode == PRODUCT_BOTH:
+        return PRODUCT_BOTH
+    if mode in PRODUCT_MODES:
+        return mode
+    if len(selectable_products()) > 1:
         return ""
     return clamp_product_mode(None)
 
@@ -54,7 +64,7 @@ def org_chat_enabled(org) -> bool:
     mode = org_product_mode(org)
     if not mode:
         return False
-    return mode in {"chat", "both"}
+    return mode in {PRODUCT_CHAT, PRODUCT_BOTH}
 
 
 def org_api_enabled(org) -> bool:
@@ -63,7 +73,24 @@ def org_api_enabled(org) -> bool:
     mode = org_product_mode(org)
     if not mode:
         return False
-    return mode in {"api", "both"}
+    return mode in {PRODUCT_API, PRODUCT_BOTH}
+
+
+def org_mcp_enabled(org) -> bool:
+    if not settings.API_ENABLED:
+        return False
+    mode = org_product_mode(org)
+    if not mode:
+        return False
+    return mode == PRODUCT_MCP
+
+
+def org_keys_enabled(org) -> bool:
+    return org_api_enabled(org) or org_mcp_enabled(org)
+
+
+def key_kind_for_org(org) -> str:
+    return PRODUCT_MCP if org_mcp_enabled(org) else PRODUCT_API
 
 
 def org_llm_backend(org) -> str:
@@ -72,10 +99,14 @@ def org_llm_backend(org) -> str:
 
 
 def home_url_name(org) -> str:
+    if next_setup_step(org) == "product":
+        return "onboarding"
     if org_chat_enabled(org):
         return "ask"
     if org_api_enabled(org):
         return "developers"
+    if org_mcp_enabled(org):
+        return "mcp_docs"
     return "ask" if settings.CHAT_ENABLED else "developers"
 
 
@@ -104,16 +135,17 @@ def _workspace(org, kind: str):
 
 
 def next_setup_step(org) -> str | None:
-    """Return 'product', 'chat', 'api', or None when setup is complete."""
+    """Return 'product', 'chat', 'api', 'mcp', or None when setup is complete."""
     if org is None:
         return "product"
     mode = org_product_mode(org)
-    if settings.CHAT_ENABLED and settings.API_ENABLED and not mode:
-        return "product"
     if not mode:
+        if len(selectable_products()) > 1:
+            return "product"
         mode = clamp_product_mode(None)
-    chat_on = settings.CHAT_ENABLED and mode in {"chat", "both"}
-    api_on = settings.API_ENABLED and mode in {"api", "both"}
+    chat_on = settings.CHAT_ENABLED and mode in {PRODUCT_CHAT, PRODUCT_BOTH}
+    api_on = settings.API_ENABLED and mode in {PRODUCT_API, PRODUCT_BOTH}
+    mcp_on = settings.API_ENABLED and mode == PRODUCT_MCP
     if chat_on:
         if clamp_llm_backend(org.llm_backend) not in VALID_LLM:
             return "chat"
@@ -121,4 +153,9 @@ def next_setup_step(org) -> str | None:
             return "chat"
     if api_on and not _live_db_ready(_workspace(org, KIND_API)):
         return "api"
+    if mcp_on:
+        if clamp_llm_backend(org.llm_backend) not in VALID_LLM:
+            return "mcp"
+        if not (getattr(org, "mcp_server_url", None) or "").strip():
+            return "mcp"
     return None

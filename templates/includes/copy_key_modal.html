@@ -1,0 +1,21 @@
+<div class="qm-modal" id="copy-key-modal" hidden>
+    <div class="qm-modal-backdrop" data-copy-key-close></div>
+    <div class="qm-modal-card" role="dialog" aria-modal="true" aria-labelledby="copy-key-title">
+        <h2 id="copy-key-title" class="page-title">Confirm your password</h2>
+        <p class="page-meta">QueryMind copies the key to your clipboard. It will not show the secret again.</p>
+        <form id="copy-key-form" method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="copy_key">
+            <div class="field">
+                <label for="copy-key-password">Password</label>
+                <input id="copy-key-password" type="password" name="password" required autocomplete="current-password">
+            </div>
+            <p class="alert alert-warning" id="copy-key-error" hidden></p>
+            <p class="alert alert-success" id="copy-key-success" hidden></p>
+            <div class="wizard-nav" style="margin-top:1rem;">
+                <button class="btn btn-secondary" type="button" data-copy-key-close>Cancel</button>
+                <button class="btn btn-primary" type="submit">Copy to clipboard</button>
+            </div>
+        </form>
+    </div>
+</div>

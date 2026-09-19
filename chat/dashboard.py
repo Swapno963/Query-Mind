@@ -28,7 +28,7 @@ from chat.ui import (
     product_context,
     workspace_for,
 )
-from chat.product import org_api_enabled, org_chat_enabled
+from chat.product import org_api_enabled, org_chat_enabled, org_mcp_enabled
 
 
 def post_login_redirect_name(user) -> str:
@@ -196,6 +196,7 @@ def _org_dashboard_context(request):
     mcp_url = (org.mcp_server_url or "").strip() if org else ""
     chat_on = org_chat_enabled(org)
     api_on = org_api_enabled(org)
+    mcp_on = org_mcp_enabled(org)
     api_is_ready = api_db_ready(api_workspace) or api_ready(api_workspace)
 
     stats = [
@@ -229,10 +230,10 @@ def _org_dashboard_context(request):
             "tone": "ok" if mcp_url else "muted",
         },
     ]
-    if api_on:
+    if api_on or mcp_on:
         stats.append(
             {
-                "label": "API access",
+                "label": "Key access",
                 "value": str(pending_count),
                 "hint": (
                     f"{pending_count} waiting · {approved_api} approved · {active_keys} active keys"
@@ -244,6 +245,7 @@ def _org_dashboard_context(request):
     actions = _admin_actions(
         chat_on=chat_on,
         api_on=api_on,
+        mcp_on=mcp_on,
         data_ready=data_is_ready,
         api_ready=api_is_ready,
         mcp_set=bool(mcp_url),
@@ -271,11 +273,11 @@ def _org_dashboard_context(request):
                 "label": "Set up API data",
             }
         )
-    if api_on and pending_count:
+    if (api_on or mcp_on) and pending_count:
         alerts.append(
             {
-                "title": f"{pending_count} API access request{'s' if pending_count != 1 else ''} waiting",
-                "body": "Approve a request before that person can create API keys.",
+                "title": f"{pending_count} key request{'s' if pending_count != 1 else ''} waiting",
+                "body": "Approve a request before that person can copy a key.",
                 "href": "dashboard",
                 "label": "Review below",
                 "anchor": "api-requests",
@@ -300,13 +302,13 @@ def _org_dashboard_context(request):
     )
 
 
-def _admin_actions(*, chat_on, api_on, data_ready, api_ready, mcp_set, pending_api):
+def _admin_actions(*, chat_on, api_on, mcp_on, data_ready, api_ready, mcp_set, pending_api):
     actions = []
     if settings.CHAT_ENABLED and settings.API_ENABLED:
         actions.append(
             {
                 "title": "Change products",
-                "body": "Switch between chat, API, or both. Existing connections stay saved.",
+                "body": "Switch between chat, API, or MCP. Existing connections stay saved.",
                 "href": "onboarding",
                 "query": "change=products",
                 "cta": "Change products",
@@ -372,6 +374,30 @@ def _admin_actions(*, chat_on, api_on, data_ready, api_ready, mcp_set, pending_a
             "tone": "ok" if mcp_set else "muted",
         }
     )
+    if mcp_on:
+        actions.append(
+            {
+                "title": "Open the MCP portal",
+                "body": "Request or copy an MCP key after staff approval.",
+                "href": "mcp_docs",
+                "cta": "Open MCP",
+                "icon": "bi-plug",
+                "status": "Configured" if mcp_set else "URL not set",
+                "tone": "ok" if mcp_set else "muted",
+            }
+        )
+        actions.append(
+            {
+                "title": "Approve MCP keys",
+                "body": "After approval the requester can copy the key with their password.",
+                "href": "dashboard",
+                "anchor": "api-requests",
+                "cta": "Review requests",
+                "icon": "bi-key",
+                "status": f"{pending_api} waiting" if pending_api else "None waiting",
+                "tone": "warn" if pending_api else "ok",
+            }
+        )
     if api_on:
         actions.append(
             {

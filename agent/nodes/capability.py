@@ -1,10 +1,13 @@
 from typing import Any
+import logging
 
 from agent.mcp.capabilities import first_matching_tool
 from agent.mcp.client import MCPClientError, list_tools
 from agent.mcp.redact import redact
 from agent.policy import decide, resolve_mode
 from agent.state import QueryMindState
+
+logger = logging.getLogger("querymind.mcp")
 
 
 def _sql_available(state: QueryMindState) -> bool:
@@ -33,10 +36,11 @@ def capability_resolve(
             except MCPClientError as exc:
                 listed = []
                 list_error = exc.message
+                logger.warning("mcp tools/list failed url=%s error=%s", url, exc.message)
         else:
             listed = []
 
-    match = first_matching_tool(intent, listed or [])
+    match = first_matching_tool(intent, listed or [], question=state.question or "")
     missing = (match or {}).get("missing") or []
     mcp_capable = bool(match and match.get("ok"))
     if provided:
@@ -48,7 +52,7 @@ def capability_resolve(
 
     if match and missing and not match.get("ok"):
         mode = "clarify"
-        reason = "missing_parameters"
+        reason = str(match.get("reason") or "missing_parameters")
     else:
         mode = resolve_mode(
             operation=intent.get("operation"),
@@ -94,4 +98,12 @@ def capability_resolve(
     elif mode == "deny":
         payload["answer_kind"] = "unsupported_operation"
         payload["database_error"] = reason
+    logger.info(
+        "capability mode=%s reason=%s tool=%s listed=%s question=%r",
+        mode,
+        reason,
+        (match or {}).get("tool") or "",
+        [item.get("name") for item in (listed or [])],
+        (state.question or "")[:160],
+    )
     return payload

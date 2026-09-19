@@ -23,7 +23,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY, DEBUG = resolve_secret_and_debug()
 
 allowed_hosts_raw = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
-ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_raw.split(",") if host.strip()]
+# ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_raw.split(",") if host.strip()]
+ALLOWED_HOSTS = ["*"]
 
 csrf_origins_raw = os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "")
 CSRF_TRUSTED_ORIGINS = [
@@ -151,12 +152,47 @@ STATICFILES_DIRS = [
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "console": {
+            "format": "{levelname} {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "console",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        "querymind": {
+            "handlers": ["console"],
+            "level": "WARNING" if "test" in sys.argv else ("DEBUG" if DEBUG else "INFO"),
+            "propagate": False,
+        },
+        "httpx": {"level": "WARNING"},
+        "httpcore": {"level": "WARNING"},
+        "mcp": {"level": "WARNING"},
+    },
+}
+
 _running_tests = "test" in sys.argv
 APP_MODE = parse_app_mode(
     os.getenv("TEST_APP_MODE", "both") if _running_tests else os.getenv("APP_MODE")
 )
 CHAT_ENABLED = chat_enabled(APP_MODE)
 API_ENABLED = api_enabled(APP_MODE)
+try:
+    MCP_TIMEOUT_SECONDS = float(os.getenv("MCP_TIMEOUT_SECONDS", "30") or 30)
+except (TypeError, ValueError):
+    MCP_TIMEOUT_SECONDS = 30.0
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "ask" if CHAT_ENABLED else "developers"

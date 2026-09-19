@@ -125,11 +125,22 @@ class ApiAccessRequest(models.Model):
         (STATUS_APPROVED, "Approved"),
         (STATUS_DENIED, "Denied"),
     ]
+    KIND_API = "api"
+    KIND_MCP = "mcp"
+    KIND_CHOICES = [
+        (KIND_API, "API key"),
+        (KIND_MCP, "MCP key"),
+    ]
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="api_access_requests",
+    )
+    kind = models.CharField(
+        max_length=16,
+        choices=KIND_CHOICES,
+        default=KIND_API,
     )
     status = models.CharField(
         max_length=20,
@@ -178,10 +189,12 @@ class Organization(models.Model):
 
     PRODUCT_CHAT = "chat"
     PRODUCT_API = "api"
+    PRODUCT_MCP = "mcp"
     PRODUCT_BOTH = "both"
     PRODUCT_CHOICES = [
         (PRODUCT_CHAT, "Chat"),
         (PRODUCT_API, "API"),
+        (PRODUCT_MCP, "MCP"),
         (PRODUCT_BOTH, "Chat and API"),
     ]
     LLM_LOCAL = "local"
@@ -201,6 +214,7 @@ class Organization(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     mcp_server_url = models.URLField(max_length=500, blank=True, default="")
+    mcp_auth_ciphertext = models.TextField(blank=True, default="")
     product_mode = models.CharField(
         max_length=16,
         choices=PRODUCT_CHOICES,
@@ -216,6 +230,24 @@ class Organization(models.Model):
 
     def __str__(self):
         return self.name
+
+    def set_mcp_access_token(self, raw: str) -> None:
+        from connections.services.crypto import encrypt_secret
+
+        self.mcp_auth_ciphertext = encrypt_secret(raw) if raw else ""
+
+    def get_mcp_access_token(self) -> str:
+        from connections.services.crypto import decrypt_secret
+
+        if not self.mcp_auth_ciphertext:
+            return ""
+        try:
+            return decrypt_secret(self.mcp_auth_ciphertext)
+        except Exception:
+            return ""
+
+    def has_mcp_access_token(self) -> bool:
+        return bool(self.mcp_auth_ciphertext)
 
     class Meta:
         verbose_name = "organization"

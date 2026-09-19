@@ -99,8 +99,8 @@ def deny_api_requests(modeladmin, request, queryset):
 
 @admin.register(ApiAccessRequest)
 class ApiAccessRequestAdmin(admin.ModelAdmin):
-    list_display = ("user", "status", "created_at", "updated_at")
-    list_filter = ("status",)
+    list_display = ("user", "kind", "status", "created_at", "updated_at")
+    list_filter = ("status", "kind")
     search_fields = ("user__username", "user__email", "note")
     autocomplete_fields = ("user",)
     readonly_fields = ("created_at", "updated_at")
@@ -148,7 +148,7 @@ class OrganizationAdmin(admin.ModelAdmin):
     list_filter = ("product_mode", "llm_backend")
     search_fields = ("name", "mcp_server_url", "created_by__email")
     autocomplete_fields = ("created_by",)
-    readonly_fields = ("created_at",)
+    readonly_fields = ("created_at", "mcp_token_configured")
     inlines = (OrganizationMembershipInline,)
     list_select_related = ("created_by",)
     date_hierarchy = "created_at"
@@ -156,9 +156,20 @@ class OrganizationAdmin(admin.ModelAdmin):
         (None, {"fields": ("name", "created_by", "created_at")}),
         (
             "Products",
-            {"fields": ("product_mode", "llm_backend", "mcp_server_url")},
+            {
+                "fields": (
+                    "product_mode",
+                    "llm_backend",
+                    "mcp_server_url",
+                    "mcp_token_configured",
+                )
+            },
         ),
     )
+
+    @admin.display(boolean=True, description="MCP token stored")
+    def mcp_token_configured(self, obj):
+        return obj.has_mcp_access_token()
 
 
 @admin.register(OrganizationMembership)

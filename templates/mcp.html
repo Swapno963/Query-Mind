@@ -1,4 +1,5 @@
 {% extends "app_base.html" %}
+{% load static %}
 
 {% block title %}MCP — QueryMind{% endblock %}
 
@@ -10,16 +11,28 @@
         </button>
         <div>
             <h1 class="page-title">MCP</h1>
-            <div class="page-meta">QueryMind is the MCP client. The restaurant JWT on the MCP server is the authority. QueryMind must not hide or invent tools.</div>
+            <div class="page-meta">QueryMind is the MCP client. Request an MCP key, wait for approval, then copy it with your password. The restaurant JWT on the MCP server is the authority.</div>
         </div>
     </div>
     <div class="docs-header-actions">
+        {% if is_platform_admin %}
         {% include "includes/docs_switch.html" %}
+        {% endif %}
+        {% if api_approved %}
+        <span class="chip chip-success">Key approved</span>
+        {% elif api_status == "pending" %}
+        <span class="chip">Request pending</span>
+        {% elif api_status == "denied" %}
+        <span class="chip chip-muted">Request denied</span>
+        {% else %}
+        <span class="chip chip-muted">No MCP key yet</span>
+        {% endif %}
     </div>
 </header>
 <div class="page-body docs-body">
     <div class="docs-layout">
         <div class="docs-main">
+            {% include "includes/key_request.html" with key_action_url=request.path %}
             <div class="review-card" id="overview">
                 <h2 class="page-title" style="margin-bottom:.5rem;">1. One client, one server URL</h2>
                 <p>An organization administrator saves the MCP server URL on Team. QueryMind then lists tools and calls them. ServeEasy’s URL is <code>/mcp</code>.</p>
@@ -37,12 +50,12 @@ http://127.0.0.1:8001/mcp
 http://easyserve.clustorflow.com/mcp</code></pre>
                     </div>
                 </div>
-                <p class="page-meta"><a href="{% url 'team' %}">Open Team</a> to set <code>mcp_server_url</code>. Do not put a restaurant JWT in QueryMind settings — only the URL.</p>
+                <p class="page-meta"><a href="{% url 'team' %}">Open Team</a> to set the ServeEasy <code>/mcp</code> URL and optionally store an encrypted restaurant access token for chat reads.</p>
             </div>
 
             <div class="review-card" id="auth">
-                <h2 class="page-title" style="margin-bottom:.5rem;">2. Forward the restaurant JWT</h2>
-                <p>Staff chat sends the ServeEasy access token as <code>X-MCP-Authorization</code>. QueryMind copies it to <code>Authorization: Bearer</code> on <code>tools/list</code> and <code>tools/call</code>. No restaurant token → the MCP server returns 401.</p>
+                <h2 class="page-title" style="margin-bottom:.5rem;">2. Restaurant JWT</h2>
+                <p>API clients should send the ServeEasy access token as <code>X-MCP-Authorization</code>. That header wins. If chat has no header, QueryMind uses the organization’s stored token as <code>Authorization: Bearer</code> on <code>tools/list</code> and <code>tools/call</code>. Chat stays read-only for create, update, and delete. The token is never shown in the UI, API payloads, or logs.</p>
                 <div class="docs-sample">
                     <div>
                         <div class="docs-sample-label">Request — ask with MCP</div>
@@ -61,7 +74,7 @@ Content-Type: application/json
 Accept: application/json</code></pre>
                     </div>
                 </div>
-                <p class="page-meta">Mint the API key as the organization admin after the MCP URL is saved. Do not mint a Django superuser key for ServeEasy.</p>
+                <p class="page-meta">{% if mcp_token_configured %}This organization has a stored MCP token for chat reads.{% else %}No stored token yet. Save one on Team if chat should call ServeEasy without a per-request header.{% endif %} Mint the API key as the organization admin after the MCP URL is saved. Do not mint a Django superuser key for ServeEasy.</p>
             </div>
 
             <div class="review-card" id="list">
@@ -157,7 +170,7 @@ Accept: application/json</code></pre>
 
             <div class="review-card" id="writes">
                 <h2 class="page-title" style="margin-bottom:.5rem;">6. Write confirmation</h2>
-                <p>Menu writes, status, and mark paid return <code>needs_confirmation</code> and a <code>confirmation_id</code>. Treat that as a tool result, not a failure. Repeat the same arguments with <code>confirmed: true</code> and that id.</p>
+                <p>Menu writes, status, and mark paid return <code>needs_confirmation</code> and a <code>confirmation_id</code>. QueryMind’s MCP executor retries that write once with <code>confirmed: true</code> and the id. Chat does not run those writes.</p>
             </div>
 
             <div class="review-card" id="tenant">
@@ -178,6 +191,7 @@ Accept: application/json</code></pre>
 
         <nav class="docs-toc" aria-label="On this page">
             <h2>On this page</h2>
+            <a href="#request-access">MCP key</a>
             <a href="#overview">Server URL</a>
             <a href="#auth">Restaurant JWT</a>
             <div class="docs-toc-sub">
@@ -191,4 +205,8 @@ Accept: application/json</code></pre>
         </nav>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/key-copy.js' %}"></script>
 {% endblock %}

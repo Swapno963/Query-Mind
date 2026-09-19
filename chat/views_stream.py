@@ -1,4 +1,5 @@
 import json
+import logging
 import random
 import time
 
@@ -14,6 +15,7 @@ from langgraph.errors import GraphRecursionError
 from agent.graph import GRAPH_RUN_CONFIG, build_on_premise_graph, build_online_graph
 from agent.nodes.result_formatter import deterministic_result_answer
 from agent.state import QueryMindState
+from chat.authentication import mcp_headers_for_user
 from chat.organizations import mcp_server_url_for, organization_for
 from chat.product import org_chat_enabled, org_llm_backend
 from chat.ui import KIND_CHAT, chat_ready, workspace_for
@@ -22,6 +24,8 @@ from .constants import ERROR_MESSAGES
 from .models import Conversation, Message
 from .services import ConversationService
 from .views import render_markdown
+
+logger = logging.getLogger("querymind")
 
 
 class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
@@ -76,6 +80,7 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
             conversation_context=conversation_context,
             engine=workspace.engine if workspace else "postgres",
             mcp_server_url=mcp_url,
+            mcp_headers=mcp_headers_for_user(request.user, request),
             llm_backend=backend,
             product_surface="chat",
         )
@@ -101,6 +106,8 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
             outcome = {}
             emitted_sql = False
             emitted_rows = False
+            started = time.monotonic()
+            success = False
             try:
                 graph = (
                     build_on_premise_graph()
@@ -202,6 +209,7 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
                     yield _sse("result", token)
                     time.sleep(random.uniform(0.03, 0.08))
                 yield _sse("done", timestamp=timestamp_str)
+                success = True
             except GraphRecursionError:
                 yield _sse(
                     "error",
@@ -216,6 +224,8 @@ class StreamChatViewGraph(LoginRequiredMixin, SingleObjectMixin, View):
                     code="error",
                     detail=_public_error_detail(exc),
                 )
+            finally:
+                _log_chat_stream(request, conversation, outcome, started, success=success)
 
         response = StreamingHttpResponse(
             generate(),
@@ -262,6 +272,21 @@ def _public_error_detail(exc: Exception) -> str:
     if len(message) > 180:
         return ""
     return message
+
+
+def _log_chat_stream(request, conversation, outcome, started, *, success):
+    routing = outcome.get("routing") or {}
+    logger.info(
+        "chat stream conversation_id=%s user_id=%s mode=%s tool=%s reason=%s duration_ms=%s retry_count=%s success=%s",
+        getattr(conversation, "id", None),
+        getattr(request.user, "id", None),
+        routing.get("mode") or outcome.get("execution_mode") or "",
+        routing.get("tool") or "",
+        routing.get("reason") or "",
+        int((time.monotonic() - started) * 1000),
+        outcome.get("retry_count") or 0,
+        success,
+    )
 
 
 def _sse_error_stream(code, message):

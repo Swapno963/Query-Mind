@@ -46,21 +46,11 @@
     {% if selectable_products|length > 1 and not dash_platform %}
     <section class="review-card">
         <h2>Products and model</h2>
-        <p class="page-meta">Chat and API can use a local Ollama model or an online Gemini model. Moving from chat to both keeps the chat database.</p>
+        <p class="page-meta">Chat, API, and MCP can use a local Ollama model or an online Gemini model. Changing products keeps saved databases.</p>
         <form method="post">
             {% csrf_token %}
             <input type="hidden" name="action" value="save_product">
-            <div class="choice-grid" style="margin:.75rem 0;">
-                {% if "chat" in selectable_products %}
-                <label><input type="radio" name="product" value="chat"{% if org_product_mode == "chat" %} checked{% endif %}> Chat</label>
-                {% endif %}
-                {% if "api" in selectable_products %}
-                <label><input type="radio" name="product" value="api"{% if org_product_mode == "api" %} checked{% endif %}> API</label>
-                {% endif %}
-                {% if "both" in selectable_products %}
-                <label><input type="radio" name="product" value="both"{% if org_product_mode == "both" %} checked{% endif %}> Both</label>
-                {% endif %}
-            </div>
+            {% include "includes/product_choice.html" with selected_product=org_product_mode grid_style="margin:.75rem 0;" %}
             <div class="field">
                 <label>Model</label>
                 <div class="choice-grid" style="margin-top:.4rem;">

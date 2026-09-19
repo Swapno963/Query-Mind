@@ -107,14 +107,14 @@ class Command(BaseCommand):
         org = ensure_organization_for_user(
             user,
             name=ORG_NAME,
-            product_mode="both" if settings.CHAT_ENABLED and settings.API_ENABLED else "",
+            product_mode="mcp" if settings.API_ENABLED else "",
             llm_backend=Organization.LLM_ONLINE,
         )
         org.name = ORG_NAME
         org.mcp_server_url = (mcp_url or "").strip()
         org.save(update_fields=["name", "mcp_server_url"])
         if settings.API_ENABLED:
-            mode = "both" if settings.CHAT_ENABLED else "api"
+            mode = "mcp"
             apply_product_mode(org, mode)
         apply_llm_backend(org, Organization.LLM_ONLINE)
         membership = OrganizationMembership.objects.filter(user=user, organization=org).first()
@@ -128,11 +128,13 @@ class Command(BaseCommand):
         access = ApiAccessRequest.objects.filter(user=user).order_by("-created_at").first()
         if access:
             access.status = ApiAccessRequest.STATUS_APPROVED
+            access.kind = ApiAccessRequest.KIND_MCP
             access.note = access.note or "Seeded ServeEasy integration key."
-            access.save(update_fields=["status", "note", "updated_at"])
+            access.save(update_fields=["status", "kind", "note", "updated_at"])
             return
         ApiAccessRequest.objects.create(
             user=user,
+            kind=ApiAccessRequest.KIND_MCP,
             status=ApiAccessRequest.STATUS_APPROVED,
             note="Seeded ServeEasy integration key.",
         )

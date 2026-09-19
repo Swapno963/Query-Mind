@@ -1,18 +1,15 @@
 from connections.services.prompt import PromptGenerator
-from connections.services.prompt import PromptGenerator
-import traceback
-import httpx
 import json
-from connections.services.result_prompt import SQLResultPromptGenerator
-from google import genai
+import logging
 import os
 import traceback
+
+import httpx
 from google import genai
 from google.genai import types
-import re
-from rest_framework import status
-from rest_framework.response import Response
-from chat.constants import ERROR_MESSAGES, OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT
+from chat.constants import OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT
+
+logger = logging.getLogger("querymind.api")
 
 
 class LLMUnavailable(Exception):
@@ -62,7 +59,7 @@ class ChatService:
             conversation_context=conversation_context,
         )
 
-        print("The prompt is : ", prompt)
+        logger.debug("sql prompt generated length=%s", len(prompt or ""))
 
         # -----------------------------------------
         # 3. Ask Qwen for SQL
@@ -136,94 +133,16 @@ class ChatService:
         user_message,
         result,
     ):
-        # -----------------------------------------
-        # 1. Build conversation context
-        # -----------------------------------------
+        from agent.nodes.result_formatter import deterministic_result_answer
+        from connections.services.sql_validation import DEFAULT_RESULT_LIMIT
 
-        # messages = list(conversation.messages.all().order_by("timestamp"))
-
-        # previous_messages = messages[:-1][-6:]
-
-        # conversation_context = "\n".join(
-        #     f"{'User' if msg.is_user else 'Assistant'}: {msg.content}"
-        #     for msg in previous_messages
-        # )
-
-        # -----------------------------------------
-        # 2. Generate SQL prompt
-        # -----------------------------------------
-
-        # prompt_generator = PromptGenerator()
-
-        # prompt = prompt_generator.generate(
-        #     question=user_message.content,
-        #     conversation_context=conversation_context,
-        # )
-
-        # -----------------------------------------
-        # 3. Ask Qwen for SQL
-        # -----------------------------------------
-
-        # sql = ChatService.ask_ai(prompt)
-
-        # sql = sql.strip()
-
-        # if not sql:
-        #     raise ValueError("AI returned an empty SQL query.")
-
-        # -----------------------------------------
-        # 4. Validate SQL
-        # -----------------------------------------
-
-        # executor = ReadOnlySQLExecutor(
-        #     database="client",
-        # )
-
-        # executor.validate(sql)
-
-        # -----------------------------------------
-        # 5. Execute SQL
-        # -----------------------------------------
-
-        # rows = []
-
-        # for row in executor.stream(sql):
-        #     rows.append(row)
-
-        # -----------------------------------------
-        # 6. Generate answer prompt
-        # -----------------------------------------
-
-        answer_prompt_generator = SQLResultPromptGenerator()
-
-        answer_prompt = answer_prompt_generator.generate(
-            user_question=user_message,
-            sql="",
-            rows=result,
-        )
-
-        # -----------------------------------------
-        # 7. Ask Qwen for final answer
-        # -----------------------------------------
-
-        final_answer = ChatService.ask_ai(answer_prompt)
-
-        final_answer = final_answer.strip()
-
-        # -----------------------------------------
-        # 8. Save AI message
-        # -----------------------------------------
-
-        # ai_message = ConversationService.add_ai_message(
-        #     conversation,
-        #     final_answer,
-        # )
-
+        rows = result if isinstance(result, list) else []
+        rows = [row for row in rows if isinstance(row, dict)][:DEFAULT_RESULT_LIMIT]
         return {
-            # "sql": sql,
-            # "rows": rows,
-            "answer": final_answer,
-            # "ai_message": ai_message,
+            "answer": deterministic_result_answer(
+                rows,
+                question=user_message or "",
+            ),
         }
 
     # @staticmethod

@@ -1,0 +1,59 @@
+{% with label=key_kind|upper %}
+<div class="review-card" id="request-access">
+    <h2 class="page-title" style="margin-bottom:.5rem;">1. {{ label }} key</h2>
+    <p>
+        {% if key_kind == "mcp" %}
+        Staff must approve this account before you can copy an MCP key for ServeEasy.
+        {% else %}
+        Staff must approve this account before you can copy an API key.
+        {% endif %}
+    </p>
+    <p class="page-meta">
+        Status:
+        {% if api_approved %}
+        <strong>Approved</strong>
+        {% elif api_status == "pending" %}
+        <strong>Waiting for approval</strong>
+        {% elif api_status == "denied" %}
+        <strong>Denied</strong>
+        {% else %}
+        <strong>Not requested</strong>
+        {% endif %}
+    </p>
+    {% if not api_approved %}
+    <form method="post" action="{{ key_action_url }}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="request">
+        <div class="field">
+            <label for="note">Note (optional)</label>
+            <textarea id="note" name="note" rows="2" placeholder="How you plan to use this key"></textarea>
+        </div>
+        <button class="btn btn-primary" type="submit" {% if api_status == "pending" %}disabled{% endif %}>
+            {% if api_status == "pending" %}Waiting for approval{% else %}Request {{ label }} key{% endif %}
+        </button>
+    </form>
+    {% else %}
+    <p class="page-meta">Approved. Copy the key, then confirm your password. QueryMind puts it on the clipboard and will not show the secret again.</p>
+    <button class="btn btn-primary" type="button" id="copy-key-open" data-copy-key data-action-url="{{ key_action_url }}">
+        Copy the key
+    </button>
+    {% endif %}
+    {% if revealed_api_key %}
+    <div class="api-key-reveal">
+        <p class="page-meta">Copy it now. QueryMind will not show the secret again.</p>
+        <pre class="docs-pre api-key-secret"><code>{{ revealed_api_key }}</code></pre>
+    </div>
+    {% endif %}
+    {% if api_keys %}
+    <ul class="api-key-list">
+        {% for key in api_keys %}
+        <li class="api-key-row">
+            <code class="api-key-mask">{{ key.masked }}</code>
+            <p class="page-meta">Secret is stored only at copy time. Copy again to mint a new key.</p>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+{% include "includes/copy_key_modal.html" %}
+{% endwith %}

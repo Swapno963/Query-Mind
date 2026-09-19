@@ -12,10 +12,13 @@
         <div>
             {% if show_product_step %}
             <h1 class="page-title">Choose what to set up</h1>
-            <div class="page-meta">Chat answers questions in the app. API lets your systems call QueryMind. You can add the other product later.</div>
+            <div class="page-meta">Chat answers questions in the app. API lets your systems call QueryMind. MCP issues a key for ServeEasy.</div>
             {% elif track == "api" %}
             <h1 class="page-title">Connect the API database</h1>
-            <div class="page-meta">API can use a local or online model. Store credentials so QueryMind can reconnect after restart. This is separate from chat.</div>
+            <div class="page-meta">API can use a local or online model. Store credentials so QueryMind can reconnect after restart.</div>
+            {% elif track == "mcp" %}
+            <h1 class="page-title">Connect MCP</h1>
+            <div class="page-meta">Save the ServeEasy /mcp URL. After this, request an MCP key and wait for staff approval before you can copy it.</div>
             {% else %}
             <h1 class="page-title">Build your Database Knowledge Profile</h1>
             <div class="page-meta">QueryMind answers only after it understands your work and your data access rules.</div>
@@ -49,25 +52,15 @@
         {% if show_product_step %}
         <section class="wizard-step" data-step="1" data-role="product">
             <h2>What do you want to use?</h2>
-            <p class="lead">You can move from chat to both later. Chat and API can use a local Ollama model or an online Gemini model.</p>
-            <div class="choice-grid">
-                {% if "chat" in selectable_products %}
-                <label><input type="radio" name="product" value="chat"{% if org_product_mode == "chat" or not org_product_mode %} checked{% endif %}> Chat</label>
-                {% endif %}
-                {% if "api" in selectable_products %}
-                <label><input type="radio" name="product" value="api"{% if org_product_mode == "api" %} checked{% endif %}> API</label>
-                {% endif %}
-                {% if "both" in selectable_products %}
-                <label><input type="radio" name="product" value="both"{% if org_product_mode == "both" %} checked{% endif %}> Both</label>
-                {% endif %}
-            </div>
+            <p class="lead">Chat, API, and MCP can use a local Ollama model or an online Gemini model.</p>
+            {% include "includes/product_choice.html" with selected_product=org_product_mode %}
         </section>
         {% endif %}
 
         {% if show_llm_step %}
         <section class="wizard-step" data-role="llm">
             <h2>Which model should QueryMind use?</h2>
-            <p class="lead">Local runs on your machine with Ollama. Online uses Gemini with the server API key. Chat and API both use this choice.</p>
+            <p class="lead">Local runs on your machine with Ollama. Online uses Gemini with the server API key.</p>
             <div class="choice-grid">
                 <label><input type="radio" name="llm_backend" value="local"{% if org_llm_backend != "online" %} checked{% endif %}> Local (Ollama, qwen2.5:3b)</label>
                 <label><input type="radio" name="llm_backend" value="online"{% if org_llm_backend == "online" %} checked{% endif %}> Online (Gemini)</label>
@@ -105,6 +98,27 @@
                 <label><input type="checkbox" name="keeps" value="Attendance"> Attendance</label>
                 <label><input type="checkbox" name="keeps" value="Menu or recipes"> Menu or recipes</label>
             </div>
+        </section>
+        {% endif %}
+
+        {% if show_mcp_steps %}
+        <section class="wizard-step" data-role="mcp">
+            <h2>MCP server URL</h2>
+            <p class="lead">QueryMind calls this URL as an MCP client. For ServeEasy use the public <code>/mcp</code> path.</p>
+            <div class="field">
+                <label for="mcp_server_url">Server URL</label>
+                <input id="mcp_server_url" name="mcp_server_url" type="url" placeholder="http://127.0.0.1:8001/mcp" value="{{ organization.mcp_server_url|default:'' }}" required>
+            </div>
+            <div class="field">
+                <label for="mcp_access_token">Restaurant access token (optional)</label>
+                <input id="mcp_access_token" name="mcp_access_token" type="password" autocomplete="new-password" placeholder="{% if mcp_token_configured %}Token saved — leave blank to keep it{% else %}Paste a ServeEasy access token for chat reads{% endif %}">
+                <p class="page-meta">Optional. Stored encrypted for MCP reads in chat. Leave blank to keep a token already saved. QueryMind will not show the token later.</p>
+            </div>
+            {% if mcp_token_configured %}
+            <div class="field">
+                <label><input type="checkbox" name="clear_mcp_access_token" value="1"> Remove stored token</label>
+            </div>
+            {% endif %}
         </section>
         {% endif %}
 

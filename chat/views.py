@@ -16,7 +16,6 @@ from django.views import View
 from django.views.generic import ListView, DetailView, TemplateView
 import markdown
 
-from DjangoForAI.app_mode import resolve_signup_product
 from connections.models import WorkspaceConnection
 from connections.services.catalog import intersect_allow_lists
 from connections.services.engines import normalize_engine
@@ -60,23 +59,27 @@ from .product import (
     next_setup_step,
     org_api_enabled,
     org_chat_enabled,
+    org_mcp_enabled,
 )
 
 from .api_keys import (
-    generate_api_key,
     set_api_access_status,
     set_org_api_access_status,
-    user_has_approved_api_access,
+)
+from .key_portal import (
+    create_access_request,
+    handle_key_portal_post,
+    portal_context,
 )
 from .dashboard import dashboard_context, post_login_redirect_name
 from .models import (
     ApiAccessRequest,
-    ApiKey,
     Conversation,
     Message,
     OrganizationMembership,
 )
 from .organizations import (
+    apply_mcp_connection,
     create_member,
     ensure_organization_for_user,
     is_org_admin,
@@ -91,7 +94,6 @@ from .constants import ERROR_MESSAGES, AI_AVATAR_TEXT
 from .ui import (
     KIND_API,
     KIND_CHAT,
-    api_db_ready,
     api_ready,
     chat_ready,
     product_context,
@@ -155,26 +157,16 @@ class RegisterView(View):
     def get(self, request):
         if request.user.is_authenticated:
             return redirect(post_login_redirect_name(request.user))
-        product = resolve_signup_product(
-            request.GET.get("product"),
-            chat=settings.CHAT_ENABLED,
-            api=settings.API_ENABLED,
-        )
-        return render(request, "auth/register.html", {"product": product})
+        return render(request, "auth/register.html")
 
     def post(self, request):
         name = (request.POST.get("name") or "").strip()
         email = (request.POST.get("email") or "").strip().lower()
         password = request.POST.get("password") or ""
         confirm = request.POST.get("password_confirm") or ""
-        product = resolve_signup_product(
-            request.POST.get("product"),
-            chat=settings.CHAT_ENABLED,
-            api=settings.API_ENABLED,
-        )
 
         def fail():
-            return render(request, "auth/register.html", {"product": product}, status=400)
+            return render(request, "auth/register.html", status=400)
 
         if not name or not email or not password:
             messages.error(request, "Name, email, and password are required.")
@@ -196,7 +188,7 @@ class RegisterView(View):
             password=password,
             first_name=name[:150],
         )
-        ensure_organization_for_user(user, name=name, product_mode=product)
+        ensure_organization_for_user(user, name=name, defer_product=True)
         login(request, user)
         return redirect(_onboarding_next_url(organization_for(user)))
 
@@ -257,18 +249,46 @@ class OrgApiRequiredMixin:
         return super().dispatch(request, *args, **kwargs)
 
 
+class OrgMcpRequiredMixin:
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            if is_platform_admin(request.user) and settings.API_ENABLED:
+                return super().dispatch(request, *args, **kwargs)
+            org = organization_for(request.user)
+            if not org_mcp_enabled(org):
+                messages.error(request, "This organization does not use MCP.")
+                return redirect(home_url_name(org))
+        return super().dispatch(request, *args, **kwargs)
+
+
+def _apply_portal_result(request, result):
+    if result is None:
+        return None
+    if isinstance(result, JsonResponse):
+        return result
+    level = result.get("level") or "info"
+    text = result.get("message") or ""
+    if text:
+        getattr(messages, level, messages.info)(request, text)
+    return None
+
+
 def _onboarding_next_url(org):
     step = next_setup_step(org)
     if step == "api":
         return reverse("onboarding") + "?track=api"
     if step == "chat":
         return reverse("onboarding") + "?track=chat"
+    if step == "mcp":
+        return reverse("onboarding") + "?track=mcp"
     if step == "product":
         return reverse("onboarding") + "?change=products"
     if org_chat_enabled(org):
         return reverse("ask")
     if org_api_enabled(org):
         return reverse("developers")
+    if org_mcp_enabled(org):
+        return reverse("mcp_docs")
     return reverse("dashboard")
 
 
@@ -283,12 +303,20 @@ def _wizard_plan(request, org):
             "show_llm_step": False,
             "show_profile_steps": False,
             "show_db_steps": False,
+            "show_mcp_steps": False,
             "track": "product",
             "finish_label": "Continue",
             "setup_action": "save_product",
         }
-    if track not in {"chat", "api"}:
-        track = step or ("api" if org_api_enabled(org) and not org_chat_enabled(org) else "chat")
+    if track not in {"chat", "api", "mcp"}:
+        if step in {"chat", "api", "mcp"}:
+            track = step
+        elif org_mcp_enabled(org):
+            track = "mcp"
+        elif org_api_enabled(org) and not org_chat_enabled(org):
+            track = "api"
+        else:
+            track = "chat"
     if track == "api":
         return {
             "wizard_kind": KIND_API,
@@ -296,19 +324,32 @@ def _wizard_plan(request, org):
             "show_llm_step": True,
             "show_profile_steps": False,
             "show_db_steps": True,
+            "show_mcp_steps": False,
             "track": "api",
             "finish_label": "Continue to API",
             "setup_action": "save_connection",
         }
-    api_done = (not org_api_enabled(org)) or api_db_ready(workspace_for(request.user, KIND_API))
+    if track == "mcp":
+        return {
+            "wizard_kind": KIND_CHAT,
+            "show_product_step": False,
+            "show_llm_step": True,
+            "show_profile_steps": False,
+            "show_db_steps": False,
+            "show_mcp_steps": True,
+            "track": "mcp",
+            "finish_label": "Continue to your MCP key",
+            "setup_action": "save_mcp_setup",
+        }
     return {
         "wizard_kind": KIND_CHAT,
         "show_product_step": False,
         "show_llm_step": True,
         "show_profile_steps": True,
         "show_db_steps": True,
+        "show_mcp_steps": False,
         "track": "chat",
-        "finish_label": "Ask your data" if api_done else "Continue to API setup",
+        "finish_label": "Ask your data",
         "setup_action": "save_connection",
     }
 
@@ -466,9 +507,43 @@ class OnboardingView(AdminRequiredMixin, View):
         org = organization_for(request.user)
         action = request.POST.get("action") or "save_connection"
         if action == "save_product":
-            apply_product_mode(org, request.POST.get("product"))
+            mode = apply_product_mode(org, request.POST.get("product"))
             if request.POST.get("llm_backend"):
                 apply_llm_backend(org, request.POST.get("llm_backend"))
+            if mode in {"api", "mcp"}:
+                kind = (
+                    ApiAccessRequest.KIND_MCP
+                    if mode == "mcp"
+                    else ApiAccessRequest.KIND_API
+                )
+                create_access_request(
+                    request.user, kind, request.POST.get("key_note") or ""
+                )
+            org.refresh_from_db()
+            return redirect(_onboarding_next_url(org))
+        if action == "save_mcp_setup":
+            if request.POST.get("llm_backend"):
+                apply_llm_backend(org, request.POST.get("llm_backend"))
+            raw = (request.POST.get("mcp_server_url") or "").strip()
+            if raw and not raw.startswith(("http://", "https://")):
+                messages.error(
+                    request, "MCP server URL must start with http:// or https://."
+                )
+                plan = _wizard_plan(request, org)
+                return render(
+                    request,
+                    "onboarding/wizard.html",
+                    _onboarding_context(request, plan),
+                    status=400,
+                )
+            org.mcp_server_url = raw
+            token = (request.POST.get("mcp_access_token") or "").strip()
+            apply_mcp_connection(
+                org,
+                url=raw,
+                token=token or None,
+                clear_token=bool(request.POST.get("clear_mcp_access_token")),
+            )
             org.refresh_from_db()
             return redirect(_onboarding_next_url(org))
         plan = _wizard_plan(request, org)
@@ -534,25 +609,9 @@ class DataAccessView(AuthenticatedWorkspaceMixin, OrgChatRequiredMixin, View):
 
 class DevelopersView(AuthenticatedWorkspaceMixin, OrgApiRequiredMixin, View):
     def get(self, request):
-        latest = request.user.api_access_requests.order_by("-created_at").first()
-        approved = user_has_approved_api_access(request.user)
         workspace = workspace_for(request.user, KIND_API)
         origin = request.build_absolute_uri("/").rstrip("/")
-        pending = request.session.get("pending_api_key") or {}
-        try:
-            pending_id = int(pending.get("key_id") or 0)
-        except (TypeError, ValueError):
-            pending_id = 0
-        revealed = request.session.pop("revealed_api_key", None)
-        api_keys = []
-        for key in request.user.api_keys.filter(revoked_at__isnull=True):
-            api_keys.append(
-                {
-                    "id": key.id,
-                    "masked": f"{key.prefix}••••",
-                    "can_reveal": pending_id == key.id,
-                }
-            )
+        context = portal_context(request, ApiAccessRequest.KIND_API)
         return render(
             request,
             "developers.html",
@@ -560,96 +619,26 @@ class DevelopersView(AuthenticatedWorkspaceMixin, OrgApiRequiredMixin, View):
                 request,
                 {
                     "active_nav": "api",
-                    "api_status": latest.status if latest else "none",
-                    "api_approved": approved,
                     "api_ready": api_ready(workspace),
-                    "api_keys": api_keys,
-                    "revealed_api_key": revealed,
                     "api_origin": origin,
                     "docs_kind": "api",
+                    **context,
                 },
             ),
         )
 
     def post(self, request):
-        action = request.POST.get("action")
-        if action == "request":
-            if user_has_approved_api_access(request.user):
-                messages.success(request, "API access is already approved.")
-            elif request.user.api_access_requests.filter(
-                status=ApiAccessRequest.STATUS_PENDING
-            ).exists():
-                messages.info(request, "Your API access request is waiting for approval.")
-            else:
-                ApiAccessRequest.objects.create(
-                    user=request.user,
-                    note=(request.POST.get("note") or "").strip(),
-                )
-                messages.success(request, "Request sent. A QueryMind admin must approve it.")
-        elif action == "create_key":
-            if not user_has_approved_api_access(request.user):
-                messages.error(
-                    request,
-                    "Your API access request has not been approved yet.",
-                )
-            elif organization_for(request.user) is None:
-                messages.error(
-                    request,
-                    "ServeEasy keys must belong to an organization admin. "
-                    "Create or sign in as that org user, save the ServeEasy /mcp URL on Team, then mint the key there.",
-                )
-            else:
-                raw, prefix, hashed = generate_api_key()
-                key = ApiKey.objects.create(
-                    user=request.user, prefix=prefix, key_hash=hashed
-                )
-                request.session["pending_api_key"] = {"key_id": key.id, "raw": raw}
-                request.session.pop("revealed_api_key", None)
-                messages.success(
-                    request,
-                    "Key created. Enter your password to copy the secret.",
-                )
-        elif action == "reveal_key":
-            self._reveal_key(request)
+        result = handle_key_portal_post(request, ApiAccessRequest.KIND_API)
+        response = _apply_portal_result(request, result)
+        if response is not None:
+            return response
         return redirect("developers")
 
-    def _reveal_key(self, request):
-        password = request.POST.get("password") or ""
-        try:
-            posted_id = int(request.POST.get("key_id") or 0)
-        except (TypeError, ValueError):
-            posted_id = 0
-        confirmed = authenticate(
-            request, username=request.user.username, password=password
-        )
-        pending = request.session.get("pending_api_key") or {}
-        try:
-            pending_id = int(pending.get("key_id") or 0)
-        except (TypeError, ValueError):
-            pending_id = 0
-        owned = request.user.api_keys.filter(
-            pk=posted_id, revoked_at__isnull=True
-        ).exists()
-        if confirmed is None or confirmed.pk != request.user.pk:
-            messages.error(request, "That password did not match.")
-            return
-        if not owned or pending_id != posted_id or not pending.get("raw"):
-            messages.error(
-                request,
-                "Secret is no longer stored. Create a new key.",
-            )
-            return
-        request.session["revealed_api_key"] = pending["raw"]
-        request.session.pop("pending_api_key", None)
-        messages.success(
-            request,
-            "Copy this key now. QueryMind will not show it again.",
-        )
 
-
-class McpDocsView(AuthenticatedWorkspaceMixin, OrgApiRequiredMixin, View):
+class McpDocsView(AuthenticatedWorkspaceMixin, OrgMcpRequiredMixin, View):
     def get(self, request):
         origin = request.build_absolute_uri("/").rstrip("/")
+        context = portal_context(request, ApiAccessRequest.KIND_MCP)
         return render(
             request,
             "mcp.html",
@@ -660,9 +649,20 @@ class McpDocsView(AuthenticatedWorkspaceMixin, OrgApiRequiredMixin, View):
                     "docs_kind": "mcp",
                     "api_origin": origin,
                     "mcp_server_url": mcp_server_url_for(request.user),
+                    "mcp_token_configured": bool(
+                        getattr(organization_for(request.user), "mcp_auth_ciphertext", "")
+                    ),
+                    **context,
                 },
             ),
         )
+
+    def post(self, request):
+        result = handle_key_portal_post(request, ApiAccessRequest.KIND_MCP)
+        response = _apply_portal_result(request, result)
+        if response is not None:
+            return response
+        return redirect("mcp_docs")
 
 
 class TeamView(AdminRequiredMixin, View):
@@ -691,6 +691,7 @@ class TeamView(AdminRequiredMixin, View):
                     "org_activity": activity,
                     "new_member_password": request.session.pop("new_member_password", None),
                     "new_member_email": request.session.pop("new_member_email", None),
+                    "mcp_token_configured": bool(org.mcp_auth_ciphertext),
                 },
             ),
         )
@@ -730,7 +731,13 @@ class TeamView(AdminRequiredMixin, View):
                 messages.error(request, "MCP server URL must start with http:// or https://.")
                 return redirect("team")
             org.mcp_server_url = raw
-            org.save(update_fields=["mcp_server_url"])
+            token = (request.POST.get("mcp_access_token") or "").strip()
+            apply_mcp_connection(
+                org,
+                url=raw,
+                token=token or None,
+                clear_token=bool(request.POST.get("clear_mcp_access_token")),
+            )
             messages.success(
                 request,
                 "MCP server saved." if raw else "MCP server cleared. Reads can use SQL; writes require MCP.",

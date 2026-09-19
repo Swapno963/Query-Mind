@@ -22,14 +22,8 @@
         {% include "auth/_visual.html" %}
         <div class="auth-card">
             <p class="auth-eyebrow">Get started</p>
-            <h1>Create your workspace</h1>
-            {% if chat_enabled and api_enabled %}
-            <p class="lead">Choose chat, API, or both. Chat needs a database connection. API uses a separate database connection. Both can use a local or online model.</p>
-            {% elif api_enabled %}
-            <p class="lead">Create an account to request API access. QueryMind stores the API database credentials so it can reconnect after restart.</p>
-            {% else %}
-            <p class="lead">Create an account so QueryMind can connect to PostgreSQL and answer questions from the tables you allow.</p>
-            {% endif %}
+            <h1>Create your account</h1>
+            <p class="lead">Enter your name, email, and password. You will choose chat, API, or MCP after this.</p>
             {% if messages %}
             {% for message in messages %}
             <p class="alert alert-warning">{{ message }}</p>
@@ -37,18 +31,6 @@
             {% endif %}
             <form method="post" action="{% url 'register' %}">
                 {% csrf_token %}
-                {% if chat_enabled and api_enabled %}
-                <div class="field">
-                    <label>What do you want to use?</label>
-                    <div class="choice-grid" style="margin-top:.4rem;">
-                        <label><input type="radio" name="product" value="chat"{% if product == 'chat' or not product %} checked{% endif %}> Chat</label>
-                        <label><input type="radio" name="product" value="api"{% if product == 'api' %} checked{% endif %}> API</label>
-                        <label><input type="radio" name="product" value="both"{% if product == 'both' %} checked{% endif %}> Both</label>
-                    </div>
-                </div>
-                {% else %}
-                <input type="hidden" name="product" value="{{ product }}">
-                {% endif %}
                 <div class="field">
                     <label for="name">Name</label>
                     <input id="name" name="name" type="text" autocomplete="name" required>
@@ -65,7 +47,7 @@
                     <label for="password_confirm">Confirm password</label>
                     <input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required>
                 </div>
-                <button class="btn btn-primary" type="submit">Get started</button>
+                <button class="btn btn-primary" type="submit">Create account</button>
             </form>
             <p class="auth-switch">Already have an account? <a href="{% url 'login' %}">Log in</a></p>
         </div>

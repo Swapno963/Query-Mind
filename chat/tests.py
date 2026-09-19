@@ -15,7 +15,7 @@ from .organizations import ensure_organization_for_user, organization_for
 from .product import apply_product_mode
 
 
-def set_org_product(user, mode="both", llm="local"):
+def set_org_product(user, mode="chat", llm="local"):
     org = organization_for(user) or ensure_organization_for_user(user)
     org.product_mode = mode
     org.llm_backend = llm
@@ -54,10 +54,13 @@ class AuthIsolationTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(User.objects.filter(username="cara@example.com").exists())
         from chat.models import OrganizationMembership
+        from chat.organizations import organization_for
 
         cara = User.objects.get(username="cara@example.com")
         membership = OrganizationMembership.objects.get(user=cara)
         self.assertEqual(membership.role, OrganizationMembership.ROLE_ADMIN)
+        self.assertEqual(organization_for(cara).product_mode, "")
+        self.assertEqual(response.url, reverse("onboarding") + "?change=products")
 
     def test_login_rejects_bad_password(self):
         response = self.client.post(
@@ -397,6 +400,51 @@ class QueryMindAPITests(TestCase):
             "Bearer restaurant-jwt",
         )
 
+    def test_chat_endpoint_uses_org_mcp_token_without_header(self):
+        self._ready_workspace()
+        raw = self._approve_and_mint()
+        self._auth(raw)
+        org = organization_for(self.user)
+        org.set_mcp_access_token("stored-jwt")
+        org.save(update_fields=["mcp_auth_ciphertext"])
+        fake_graph = MagicMock()
+        fake_graph.invoke.return_value = {
+            "sql": "SELECT 1",
+            "validation_result": {"valid": True, "kind": "ok"},
+        }
+        with patch("chat.api.views.build_api_query_graph", return_value=fake_graph):
+            asked = self.api.post(
+                "/api/v1/chat/",
+                {"message": "How many unpaid orders?"},
+                format="json",
+            )
+        self.assertEqual(asked.status_code, 200)
+        state = fake_graph.invoke.call_args[0][0]
+        self.assertEqual(state.mcp_headers.get("Authorization"), "Bearer stored-jwt")
+
+    def test_chat_endpoint_header_overrides_org_mcp_token(self):
+        self._ready_workspace()
+        raw = self._approve_and_mint()
+        self._auth(raw)
+        org = organization_for(self.user)
+        org.set_mcp_access_token("stored-jwt")
+        org.save(update_fields=["mcp_auth_ciphertext"])
+        fake_graph = MagicMock()
+        fake_graph.invoke.return_value = {
+            "sql": "SELECT 1",
+            "validation_result": {"valid": True, "kind": "ok"},
+        }
+        with patch("chat.api.views.build_api_query_graph", return_value=fake_graph):
+            asked = self.api.post(
+                "/api/v1/chat/",
+                {"message": "How many unpaid orders?"},
+                format="json",
+                HTTP_X_MCP_AUTHORIZATION="Bearer restaurant-jwt",
+            )
+        self.assertEqual(asked.status_code, 200)
+        state = fake_graph.invoke.call_args[0][0]
+        self.assertEqual(state.mcp_headers.get("Authorization"), "Bearer restaurant-jwt")
+
 
 class RuntimeEnvTests(TestCase):
     def test_production_refuses_insecure_secret(self):
@@ -458,16 +506,16 @@ class WorkspaceProductTests(TestCase):
     def setUp(self):
         self.password = "CorrectHorseBattery9"
         self.user = User.objects.create_user(
-            username="both@example.com",
-            email="both@example.com",
+            username="api@example.com",
+            email="api@example.com",
             password=self.password,
         )
         self.client = Client()
         self.client.force_login(self.user)
-        org = ensure_organization_for_user(self.user, product_mode="both")
-        apply_product_mode(org, "both")
+        org = ensure_organization_for_user(self.user, product_mode="api")
+        apply_product_mode(org, "api")
 
-    def test_register_api_skips_chat_onboarding(self):
+    def test_register_api_then_chooses_api_setup(self):
         guest = Client()
         response = guest.post(
             reverse("register"),
@@ -480,9 +528,16 @@ class WorkspaceProductTests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, reverse("onboarding") + "?track=api")
+        self.assertEqual(response.url, reverse("onboarding") + "?change=products")
+        chosen = guest.post(
+            reverse("onboarding"),
+            {"action": "save_product", "product": "api", "change": "products"},
+        )
+        self.assertEqual(chosen.status_code, 302)
+        self.assertEqual(chosen.url, reverse("onboarding") + "?track=api")
 
     def test_api_catalog_does_not_make_chat_ready(self):
+        apply_product_mode(organization_for(self.user), "chat")
         WorkspaceConnection.objects.create(
             user=self.user,
             kind=WorkspaceConnection.KIND_API,
@@ -546,25 +601,29 @@ class WorkspaceProductTests(TestCase):
         page = self.client.get(reverse("developers"))
         html = page.content.decode()
         self.assertIn('href="#request-access"', html)
-        self.assertIn('href="#create-key"', html)
         self.assertIn("On this page", html)
         self.assertIn("Example response", html)
-        self.assertContains(page, reverse("mcp_docs"))
+        self.assertContains(page, "Request API key")
+        self.assertNotIn('href="/developers/mcp/"', html)
 
     def test_mcp_docs_page_has_in_page_toc(self):
+        apply_product_mode(organization_for(self.user), "mcp")
         page = self.client.get(reverse("mcp_docs"))
         self.assertEqual(page.status_code, 200)
         html = page.content.decode()
         self.assertIn("On this page", html)
+        self.assertIn('href="#request-access"', html)
         self.assertIn('href="#overview"', html)
         self.assertIn('href="#auth"', html)
         self.assertIn('href="#list"', html)
         self.assertIn("X-MCP-Authorization", html)
         self.assertIn("permission_denied", html)
-        self.assertContains(page, reverse("developers"))
+        self.assertContains(page, "Request MCP key")
         self.assertContains(page, "list_orders")
+        self.assertNotIn('href="/developers/"', html)
 
     def test_api_messages_are_not_shown_in_chat_history(self):
+        apply_product_mode(organization_for(self.user), "chat")
         api_workspace = WorkspaceConnection.objects.create(
             user=self.user,
             kind=WorkspaceConnection.KIND_API,
@@ -590,57 +649,48 @@ class DevelopersKeyRevealTests(TestCase):
         )
         self.client = Client()
         self.client.force_login(self.user)
-        org = ensure_organization_for_user(self.user, product_mode="both")
-        apply_product_mode(org, "both")
+        org = ensure_organization_for_user(self.user, product_mode="api")
+        apply_product_mode(org, "api")
         ApiAccessRequest.objects.create(
             user=self.user,
+            kind=ApiAccessRequest.KIND_API,
             status=ApiAccessRequest.STATUS_APPROVED,
         )
 
-    def _mint(self):
-        response = self.client.post(reverse("developers"), {"action": "create_key"})
-        self.assertEqual(response.status_code, 302)
-        key = ApiKey.objects.get(user=self.user)
-        raw = self.client.session["pending_api_key"]["raw"]
-        return key, raw
-
-    def test_created_key_is_masked_on_get(self):
-        key, raw = self._mint()
+    def test_approved_state_shows_copy_button(self):
         page = self.client.get(reverse("developers"))
         html = page.content.decode()
-        self.assertNotIn(raw, html)
-        self.assertIn(f"{key.prefix}••••", html)
-        self.assertContains(page, "Copy secret")
+        self.assertContains(page, "Copy the key")
+        self.assertNotIn("Create API key", html)
+        self.assertNotIn("Copy secret", html)
 
-    def test_reveal_rejects_wrong_password(self):
-        key, raw = self._mint()
-        self.client.post(
+    def test_copy_rejects_wrong_password(self):
+        response = self.client.post(
             reverse("developers"),
-            {
-                "action": "reveal_key",
-                "key_id": key.id,
-                "password": "wrong-password",
-            },
+            {"action": "copy_key", "password": "wrong-password"},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
         )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+        self.assertFalse(ApiKey.objects.filter(user=self.user).exists())
+
+    def test_copy_with_password_returns_key_once(self):
+        response = self.client.post(
+            reverse("developers"),
+            {"action": "copy_key", "password": self.password},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        raw = payload["key"]
+        self.assertTrue(raw.startswith("qm_live_"))
+        self.assertTrue(ApiKey.objects.filter(user=self.user).exists())
         page = self.client.get(reverse("developers"))
         self.assertNotIn(raw, page.content.decode())
-        self.assertIn("pending_api_key", self.client.session)
-
-    def test_reveal_shows_secret_once(self):
-        key, raw = self._mint()
-        self.client.post(
-            reverse("developers"),
-            {
-                "action": "reveal_key",
-                "key_id": key.id,
-                "password": self.password,
-            },
-        )
-        first = self.client.get(reverse("developers"))
-        self.assertContains(first, raw)
-        second = self.client.get(reverse("developers"))
-        self.assertNotIn(raw, second.content.decode())
-        self.assertContains(second, "Secret is no longer stored. Create a new key.")
+        self.assertContains(page, "••••")
 
 
 def reload_urlconf():
@@ -706,7 +756,7 @@ class AppModeRoutingTests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, reverse("onboarding") + "?track=api")
+        self.assertEqual(response.url, reverse("onboarding") + "?change=products")
 
 
 class OrganizationAccessTests(TestCase):
@@ -924,23 +974,80 @@ class OrgProductSetupTests(TestCase):
             allowed_columns={"orders": ["id"]},
         )
 
-    def test_register_both_stores_product_and_starts_chat_setup(self):
+    def test_register_then_choose_mcp_on_setup(self):
         guest = Client()
         response = guest.post(
             reverse("register"),
             {
-                "name": "Both",
-                "email": "both-setup@example.com",
+                "name": "MCP",
+                "email": "mcp-setup@example.com",
                 "password": self.password,
                 "password_confirm": self.password,
-                "product": "both",
+                "product": "mcp",
+                "mcp_server_url": "http://127.0.0.1:8001/mcp",
+                "key_note": "ServeEasy staff chat",
             },
         )
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, reverse("onboarding") + "?track=chat")
-        user = User.objects.get(username="both-setup@example.com")
+        self.assertEqual(response.url, reverse("onboarding") + "?change=products")
+        user = User.objects.get(username="mcp-setup@example.com")
         org = organization_for(user)
-        self.assertEqual(org.product_mode, "both")
+        self.assertEqual(org.product_mode, "")
+        self.assertEqual(org.mcp_server_url, "")
+        self.assertFalse(ApiAccessRequest.objects.filter(user=user).exists())
+        chosen = guest.post(
+            reverse("onboarding"),
+            {
+                "action": "save_product",
+                "product": "mcp",
+                "change": "products",
+                "key_note": "ServeEasy staff chat",
+            },
+        )
+        self.assertEqual(chosen.status_code, 302)
+        self.assertEqual(chosen.url, reverse("onboarding") + "?track=mcp")
+        org.refresh_from_db()
+        self.assertEqual(org.product_mode, "mcp")
+        req = ApiAccessRequest.objects.get(user=user)
+        self.assertEqual(req.kind, ApiAccessRequest.KIND_MCP)
+        self.assertEqual(req.status, ApiAccessRequest.STATUS_PENDING)
+
+    def test_register_then_choose_chat_starts_database_setup(self):
+        guest = Client()
+        response = guest.post(
+            reverse("register"),
+            {
+                "name": "Chat",
+                "email": "chat-setup@example.com",
+                "password": self.password,
+                "password_confirm": self.password,
+                "product": "chat",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("onboarding") + "?change=products")
+        chosen = guest.post(
+            reverse("onboarding"),
+            {"action": "save_product", "product": "chat", "change": "products"},
+        )
+        self.assertEqual(chosen.status_code, 302)
+        self.assertEqual(chosen.url, reverse("onboarding") + "?track=chat")
+        self.assertFalse(
+            ApiAccessRequest.objects.filter(
+                user__username="chat-setup@example.com"
+            ).exists()
+        )
+
+    def test_register_page_is_credentials_only(self):
+        page = Client().get(reverse("register"))
+        html = page.content.decode()
+        self.assertIn('name="name"', html)
+        self.assertIn('name="email"', html)
+        self.assertIn('name="password"', html)
+        self.assertNotIn('name="product"', html)
+        self.assertNotIn("mcp_server_url", html)
+        self.assertNotIn('value="chat"', html)
+        self.assertNotIn('value="mcp"', html)
 
     def test_chat_only_org_cannot_open_developers(self):
         page = self.client.get(reverse("developers"))
@@ -958,16 +1065,22 @@ class OrgProductSetupTests(TestCase):
         self.assertEqual(page.status_code, 302)
         self.assertEqual(page.url, reverse("developers"))
 
-    def test_admin_can_move_chat_to_both_without_wiping_chat(self):
+    def test_api_only_org_cannot_open_mcp_docs(self):
+        apply_product_mode(self.org, "api")
+        page = self.client.get(reverse("mcp_docs"))
+        self.assertEqual(page.status_code, 302)
+        self.assertEqual(page.url, reverse("developers"))
+
+    def test_admin_can_move_chat_to_mcp_without_wiping_chat(self):
         chat = self._ready_chat()
         response = self.client.post(
             reverse("dashboard"),
-            {"action": "save_product", "product": "both", "llm_backend": "local"},
+            {"action": "save_product", "product": "mcp", "llm_backend": "local"},
         )
         self.assertEqual(response.status_code, 302)
-        self.assertIn("track=api", response.url)
+        self.assertIn("track=mcp", response.url)
         self.org.refresh_from_db()
-        self.assertEqual(self.org.product_mode, "both")
+        self.assertEqual(self.org.product_mode, "mcp")
         chat.refresh_from_db()
         self.assertEqual(chat.db_name, "shop")
         self.assertEqual(chat.allowed_tables, ["orders"])
@@ -1042,6 +1155,113 @@ class OrgProductSetupTests(TestCase):
         list(response.streaming_content)
         local_graph.assert_called_once()
         online_graph.assert_not_called()
+        state = local_graph.return_value.stream.call_args[0][0]
+        self.assertEqual(state.product_surface, "chat")
+        self.assertEqual(state.mcp_headers, {})
+
+    @patch("chat.views_stream.build_online_graph")
+    @patch("chat.views_stream.build_on_premise_graph")
+    def test_stream_forwards_mcp_authorization_header(self, local_graph, online_graph):
+        self._ready_chat()
+        conversation = Conversation.objects.create(user=self.admin, title="Q")
+        message = Message.objects.create(
+            conversation=conversation, content="How many orders?", is_user=True
+        )
+        local_graph.return_value.stream.return_value = iter([])
+        online_graph.return_value.stream.return_value = iter([])
+        response = self.client.get(
+            reverse("stream_chat", args=[conversation.id]),
+            {"message_id": message.id},
+            HTTP_X_MCP_AUTHORIZATION="Bearer restaurant-jwt",
+        )
+        self.assertEqual(response.status_code, 200)
+        list(response.streaming_content)
+        state = local_graph.return_value.stream.call_args[0][0]
+        self.assertEqual(state.mcp_headers.get("Authorization"), "Bearer restaurant-jwt")
+
+    @patch("chat.views_stream.build_online_graph")
+    @patch("chat.views_stream.build_on_premise_graph")
+    def test_stream_uses_org_mcp_token_without_header(self, local_graph, online_graph):
+        self._ready_chat()
+        self.org.set_mcp_access_token("stored-jwt")
+        self.org.save(update_fields=["mcp_auth_ciphertext"])
+        conversation = Conversation.objects.create(user=self.admin, title="Q")
+        message = Message.objects.create(
+            conversation=conversation, content="How many orders?", is_user=True
+        )
+        local_graph.return_value.stream.return_value = iter([])
+        online_graph.return_value.stream.return_value = iter([])
+        response = self.client.get(
+            reverse("stream_chat", args=[conversation.id]),
+            {"message_id": message.id},
+        )
+        self.assertEqual(response.status_code, 200)
+        list(response.streaming_content)
+        state = local_graph.return_value.stream.call_args[0][0]
+        self.assertEqual(state.mcp_headers.get("Authorization"), "Bearer stored-jwt")
+
+    @patch("chat.views_stream.build_online_graph")
+    @patch("chat.views_stream.build_on_premise_graph")
+    def test_stream_header_overrides_org_mcp_token(self, local_graph, online_graph):
+        self._ready_chat()
+        self.org.set_mcp_access_token("stored-jwt")
+        self.org.save(update_fields=["mcp_auth_ciphertext"])
+        conversation = Conversation.objects.create(user=self.admin, title="Q")
+        message = Message.objects.create(
+            conversation=conversation, content="How many orders?", is_user=True
+        )
+        local_graph.return_value.stream.return_value = iter([])
+        online_graph.return_value.stream.return_value = iter([])
+        response = self.client.get(
+            reverse("stream_chat", args=[conversation.id]),
+            {"message_id": message.id},
+            HTTP_X_MCP_AUTHORIZATION="Bearer restaurant-jwt",
+        )
+        self.assertEqual(response.status_code, 200)
+        list(response.streaming_content)
+        state = local_graph.return_value.stream.call_args[0][0]
+        self.assertEqual(state.mcp_headers.get("Authorization"), "Bearer restaurant-jwt")
+
+    def test_team_stores_encrypted_mcp_token_without_echoing_it(self):
+        secret = "restaurant-jwt-secret"
+        saved = self.client.post(
+            reverse("team"),
+            {
+                "action": "save_mcp",
+                "mcp_server_url": "http://127.0.0.1:8001/mcp",
+                "mcp_access_token": secret,
+            },
+        )
+        self.assertEqual(saved.status_code, 302)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.get_mcp_access_token(), secret)
+        self.assertNotEqual(self.org.mcp_auth_ciphertext, secret)
+        page = self.client.get(reverse("team"))
+        html = page.content.decode()
+        self.assertNotIn(secret, html)
+        self.assertNotIn(self.org.mcp_auth_ciphertext, html)
+        kept = self.client.post(
+            reverse("team"),
+            {
+                "action": "save_mcp",
+                "mcp_server_url": "http://127.0.0.1:8001/mcp",
+                "mcp_access_token": "",
+            },
+        )
+        self.assertEqual(kept.status_code, 302)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.get_mcp_access_token(), secret)
+        cleared = self.client.post(
+            reverse("team"),
+            {
+                "action": "save_mcp",
+                "mcp_server_url": "http://127.0.0.1:8001/mcp",
+                "clear_mcp_access_token": "1",
+            },
+        )
+        self.assertEqual(cleared.status_code, 302)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.get_mcp_access_token(), "")
 
     @patch("chat.views_stream.build_online_graph")
     @patch("chat.views_stream.build_on_premise_graph")

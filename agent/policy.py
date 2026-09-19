@@ -15,18 +15,18 @@ def decide(operation: str | None, *, product_surface: str = "") -> dict[str, Any
             "mcp_required": False,
         }
     if op in WRITE_OPERATIONS:
-        if product_surface == "chat":
+        if product_surface == "api":
             return {
                 "operation": op,
                 "sql_allowed": False,
-                "mcp_allowed": False,
-                "mcp_required": False,
+                "mcp_allowed": True,
+                "mcp_required": True,
             }
         return {
             "operation": op,
             "sql_allowed": False,
-            "mcp_allowed": True,
-            "mcp_required": True,
+            "mcp_allowed": False,
+            "mcp_required": False,
         }
     return {
         "operation": op or None,

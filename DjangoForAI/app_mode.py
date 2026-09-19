@@ -1,4 +1,4 @@
-"""Deployment product mode: chat UI, REST API, or both."""
+"""Deployment APP_MODE (chat UI, REST API, or both) vs org product (chat, api, mcp)."""
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -7,6 +7,16 @@ ALIASES = {
     "chat-only": "chat",
     "api-only": "api",
     "all": "both",
+}
+
+PRODUCT_CHAT = "chat"
+PRODUCT_API = "api"
+PRODUCT_MCP = "mcp"
+PRODUCT_BOTH = "both"
+PRODUCT_MODES = (PRODUCT_CHAT, PRODUCT_API, PRODUCT_MCP)
+PRODUCT_ALIASES = {
+    "both": PRODUCT_MCP,
+    "all": PRODUCT_MCP,
 }
 
 
@@ -29,20 +39,21 @@ def api_enabled(mode: str) -> bool:
 
 
 def allowed_product_modes(*, chat: bool, api: bool) -> tuple[str, ...]:
-    if chat and api:
-        return VALID_MODES
+    modes: list[str] = []
     if chat:
-        return ("chat",)
+        modes.append(PRODUCT_CHAT)
     if api:
-        return ("api",)
-    return ()
+        modes.append(PRODUCT_API)
+        modes.append(PRODUCT_MCP)
+    return tuple(modes)
 
 
 def resolve_signup_product(requested: str | None, *, chat: bool, api: bool) -> str:
     allowed = allowed_product_modes(chat=chat, api=api)
-    if len(allowed) == 1:
-        return allowed[0]
-    product = (requested or "chat").strip().lower()
-    if product not in allowed:
-        return "chat" if "chat" in allowed else (allowed[0] if allowed else "chat")
-    return product
+    product = (requested or "").strip().lower()
+    product = PRODUCT_ALIASES.get(product, product)
+    if product in allowed:
+        return product
+    if PRODUCT_CHAT in allowed:
+        return PRODUCT_CHAT
+    return allowed[0] if allowed else PRODUCT_CHAT

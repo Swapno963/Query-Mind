@@ -12,6 +12,7 @@ def ensure_organization_for_user(
     name: str = "",
     product_mode: str = "",
     llm_backend: str = "",
+    defer_product: bool = False,
 ) -> Organization:
     membership = (
         OrganizationMembership.objects.filter(user=user, is_active=True)
@@ -20,11 +21,16 @@ def ensure_organization_for_user(
     )
     if membership:
         return membership.organization
-    mode = resolve_signup_product(
-        product_mode,
-        chat=settings.CHAT_ENABLED,
-        api=settings.API_ENABLED,
-    )
+    from chat.product import selectable_products
+
+    if defer_product and len(selectable_products()) > 1:
+        mode = ""
+    else:
+        mode = resolve_signup_product(
+            product_mode,
+            chat=settings.CHAT_ENABLED,
+            api=settings.API_ENABLED,
+        )
     backend = (llm_backend or "").strip().lower()
     if backend not in {Organization.LLM_LOCAL, Organization.LLM_ONLINE}:
         backend = ""
@@ -61,6 +67,28 @@ def organization_for(user) -> Organization | None:
 def mcp_server_url_for(user) -> str:
     org = organization_for(user)
     return (getattr(org, "mcp_server_url", None) or "").strip() if org else ""
+
+
+def apply_mcp_connection(
+    org,
+    *,
+    url: str | None = None,
+    token: str | None = None,
+    clear_token: bool = False,
+) -> list[str]:
+    fields: list[str] = []
+    if url is not None:
+        org.mcp_server_url = url
+        fields.append("mcp_server_url")
+    if clear_token:
+        org.mcp_auth_ciphertext = ""
+        fields.append("mcp_auth_ciphertext")
+    elif token:
+        org.set_mcp_access_token(token)
+        fields.append("mcp_auth_ciphertext")
+    if fields:
+        org.save(update_fields=fields)
+    return fields
 
 
 def is_platform_admin(user) -> bool:

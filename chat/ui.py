@@ -16,6 +16,7 @@ from chat.product import (
     org_api_enabled,
     org_chat_enabled,
     org_llm_backend,
+    org_mcp_enabled,
     org_product_mode,
     selectable_products,
 )
@@ -185,6 +186,7 @@ def product_context(request, extra=None):
     platform = bool(user and user.is_authenticated and is_platform_admin(user))
     chat_on = True if platform and settings.CHAT_ENABLED else (org_chat_enabled(org) if org else False)
     api_on = True if platform and settings.API_ENABLED else (org_api_enabled(org) if org else False)
+    mcp_on = True if platform and settings.API_ENABLED else (org_mcp_enabled(org) if org else False)
     setup_step = None if platform else (next_setup_step(org) if org else None)
     context = {
         "recent_conversations": recent,
@@ -209,11 +211,13 @@ def product_context(request, extra=None):
         "engine_choices": ENGINE_CHOICES,
         "chat_enabled": chat_on,
         "api_enabled": api_on,
+        "mcp_enabled": mcp_on,
         "app_home_url_name": "dashboard" if platform else (home_url_name(org) if org else "ask"),
         "org_product_mode": org_product_mode(org) if org else "",
         "org_llm_backend": org_llm_backend(org) if org else "",
         "selectable_products": selectable_products(),
         "setup_step": setup_step,
+        "mcp_token_configured": bool(org and org.has_mcp_access_token()),
         "show_setup_nav": bool(
             user
             and user.is_authenticated
